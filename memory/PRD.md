@@ -1,37 +1,41 @@
-# Testify — Testimonial Collection & Showcase SaaS
+# Testify — PRD & Migration Log
 
-## Original Problem Statement
-Build a modern SaaS (like Testimonial.to, own branding) for businesses/creators/agencies to collect video + written customer testimonials via shareable public pages, manage/approve them, and showcase them via embeddable widgets on any website.
+## Original problem statement
+User has a web app in a GitHub repo (`lintnz/testifyown`). They want to deploy it with their **own credentials** — frontend on **Vercel** (`www.testify.day`) and backend on **Railway** (`www.backend.testify.day`) — with MongoDB Atlas. All Emergent APIs, code, and backgrounds must be removed. The user deploys themselves; agent only prepares code, config, env vars, domains, and fixes issues.
 
 ## Architecture
-- **Backend**: FastAPI (modular: server.py routes, auth.py, storage.py, email_service.py, captcha.py, models.py, db.py), MongoDB (motor). All routes /api prefixed.
-- **Frontend**: React + React Router + TanStack Query + Tailwind + shadcn/ui + framer-motion. Fonts: Outfit (heading) / Manrope (body). Dark-first premium aesthetic, accent #ff5722.
-- **Auth**: JWT Bearer (localStorage `testify_token`) — email/password + Emergent-managed Google login unified into one app JWT.
-- **Storage**: Emergent object storage (video, images, logos) served via /api/media/{path}.
-- **Email**: Resend service abstraction (currently MOCKED — logs only until RESEND_API_KEY set).
-- **Spam**: Google reCAPTCHA v2 abstraction (currently graceful-skip until keys set) + honeypot + in-memory rate limiting.
+- Backend: FastAPI + Motor (MongoDB Atlas) on Railway
+- Frontend: React (CRA + craco) on Vercel
+- Storage: AWS S3 via boto3 for testimonial images/videos
+- Auth: JWT + Google Identity Services (standard Google OAuth)
+- Payments: Stripe subscriptions with webhook
+- Email: Resend, Captcha: reCAPTCHA v2
 
-## User Personas
-- Business owner (SaaS, agency, coach, creator, freelancer) — collects & showcases testimonials.
-- Customer/testimonial giver — submits video/written testimonial with no account.
+## Emergent-code removed (Jan 2026)
+- `backend/storage.py` → boto3 + AWS S3 (was `integrations.emergentagent.com/objstore`)
+- `backend/auth.py` → `google.oauth2.id_token.verify_oauth2_token` (was `demobackend.emergentagent.com`)
+- `backend/server.py` → removed `sk_test_emergent` fallback; `CORS_ORIGINS` env-driven; added `/health`
+- `backend/email_service.py` → prefer env vars
+- `backend/requirements.txt` → removed `emergentintegrations`, emergent litellm wheel
+- `backend/setup_stripe.py` → renamed emergent metadata keys
+- `frontend/src/components/GoogleButton.jsx` → Google Identity Services with `REACT_APP_GOOGLE_CLIENT_ID`
+- `frontend/src/context/AuthContext.js` + `App.js` → credential-based Google auth, removed session_id callback
+- `frontend/craco.config.js` + `package.json` → removed `@emergentbase/visual-edits`
+- `frontend/public/index.html` → removed Emergent script + PostHog init, rebranded
 
-## Core Requirements (static)
-Auth, workspaces, collection pages, public mobile-first submission (video record/upload + written), testimonial management (approve/reject/archive/edit/tag/feature), embeddable widgets (grid/carousel/masonry/single/video-wall) with live preview + embed code, analytics, landing page, onboarding.
+## Added deployment files
+- `backend/Procfile`, `backend/railway.toml`, `backend/runtime.txt`, `backend/.env.example`
+- `frontend/vercel.json`, `frontend/.env.example`
+- `README.md` — full Railway + Vercel deploy guide
+- `.gitignore` — protects `.env` files
 
-## Implemented (2026-06)
-- Auth: register/login/logout/me/profile/forgot+reset password; Google OAuth; brute-force lockout.
-- Onboarding wizard (business name → color → collection → shareable link).
-- Dashboard: sidebar shell, Overview (stats + recent + approve), Testimonials (filters/search/approve/reject/tag/feature/delete), Testimonial detail (edit public content, notes, tags, consent), Collection pages (CRUD, publish, share dialog w/ QR + email/WhatsApp/LinkedIn), Collection editor (branding, fields, custom questions, thank-you/redirect), Widgets (CRUD), Widget Builder (live preview + all config + embed code), Analytics (recharts timeseries + type pie), Settings (profile, workspace branding + logo upload, theme, plan).
-- Public collection submission page (mobile-first, video recorder w/ upload fallback, written, rating, consent, avatar upload, honeypot, optional reCAPTCHA).
-- Widget embed system: /api/widget.js script injects auto-resizing iframe → /embed/{id} rendering approved-only public testimonials; live sync from dashboard.
-- Landing page (hero, marquee wall, how-it-works, features, use cases, pricing, FAQ, CTA).
-- Seed demo data (admin@testify.com / admin123, 6 testimonials, tags, widget).
-- Tested: 26/26 backend pytest + frontend flows PASS (iteration_1.json). Full E2E propagation verified.
+## What the user still needs before deploying
+- Google OAuth: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `REACT_APP_GOOGLE_CLIENT_ID`
+- Stripe: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (after creating webhook)
+- reCAPTCHA: `RECAPTCHA_SITE_KEY`, `RECAPTCHA_SECRET_KEY`
+- `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `JWT_SECRET` (64+ char random)
+- `S3_BUCKET_NAME`, `AWS_REGION`, verified Resend sender email
 
-## Backlog / Remaining
-- P1: Wire real Resend key (emails) + real reCAPTCHA keys (spam) — currently MOCKED.
-- P1: Browser video recording verified via upload path; live camera record needs device QA.
-- P2: Team members / multi-user roles, custom domain, white-label, admin panel, Stripe billing, video processing/thumbnails/transcoding, SEO/OG meta for public pages, Redis rate limiting for prod.
-
-## Next Tasks
-See finish summary Next Action Items.
+## Backlog
+- P1: E2E smoke test after live deploy (register, login, S3 upload, testimonial submit, Stripe checkout)
+- P2: Cloudinary/R2 alternative if S3 egress becomes costly

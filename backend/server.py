@@ -31,8 +31,9 @@ from email_service import (
 from captcha import verify_recaptcha
 from settings_store import get_settings, get_setting, update_settings
 import stripe
+import requests
 
-stripe.api_key = os.environ.get("STRIPE_SECRET_KEY") or "sk_test_emergent"
+stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 
 PLAN_BY_LOOKUP = {"pro_monthly": "pro", "pro_yearly": "pro", "business_monthly": "business", "business_yearly": "business"}
@@ -149,7 +150,7 @@ async def login(data: m.LoginInput, request: Request):
 
 @api.post("/auth/google")
 async def google_auth(data: m.GoogleSessionInput):
-    info = authlib.exchange_google_session(data.session_id)
+    info = authlib.verify_google_id_token(data.credential)
     email = info["email"].lower()
     user = await db.users.find_one({"email": email})
     if not user:
@@ -1314,13 +1315,19 @@ async def stripe_webhook(request: Request):
 
 app.include_router(api)
 
+_cors_origins = [o.strip() for o in (os.environ.get("CORS_ORIGINS", "*")).split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=False,
-    allow_origins=["*"],
+    allow_origins=_cors_origins if _cors_origins != ["*"] else ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
 
 
 @app.on_event("startup")
@@ -1330,7 +1337,7 @@ async def startup():
         init_storage()
         logger.info("Storage initialized")
     except Exception as e:
-        logger.error(f"Storage init failed: {e}")
+        logger.warning(f"Storage init skipped: {e}")
     try:
         await authlib.seed_admin()
     except Exception as e:

@@ -9,7 +9,7 @@ stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
 
 CATALOG = [
     {
-        "emergent_product_id": "testify_pro",
+        "product_key": "testify_pro",
         "name": "Testify Pro",
         "tax_code": "txcd_10103001",  # SaaS
         "prices": [
@@ -18,7 +18,7 @@ CATALOG = [
         ],
     },
     {
-        "emergent_product_id": "testify_business",
+        "product_key": "testify_business",
         "name": "Testify Business",
         "tax_code": "txcd_10103001",
         "prices": [
@@ -31,11 +31,11 @@ CATALOG = [
 
 def get_or_create_product(entry):
     for p in stripe.Product.list(active=True).auto_paging_iter():
-        if p.to_dict().get("metadata", {}).get("emergent_product_id") == entry["emergent_product_id"]:
+        if p.to_dict().get("metadata", {}).get("product_key") == entry["product_key"]:
             return p
     return stripe.Product.create(
         name=entry["name"], tax_code=entry.get("tax_code"),
-        metadata={"managed_by": "emergent", "emergent_product_id": entry["emergent_product_id"]},
+        metadata={"managed_by": "testify", "product_key": entry["product_key"]},
     )
 
 

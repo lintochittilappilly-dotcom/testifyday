@@ -1,15 +1,15 @@
 import os
-import uuid
 import jwt
 import bcrypt
-import requests
 from datetime import datetime, timezone, timedelta
 from fastapi import HTTPException, Request
+
+from google.oauth2 import id_token
+from google.auth.transport import requests as g_requests
 
 from db import db
 
 JWT_ALGORITHM = "HS256"
-EMERGENT_SESSION_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
 
 
 def hash_password(password: str) -> str:
@@ -61,9 +61,6 @@ async def get_current_user(request: Request) -> dict:
 
 
 async def get_user_workspace(user: dict) -> dict:
-    """Resolve the workspace the user is currently acting in.
-    Uses active_workspace_id when the user is a member of it, else falls back
-    to the workspace they own."""
     active_id = user.get("active_workspace_id")
     if active_id:
         mem = await db.workspace_members.find_one({"workspace_id": active_id, "user_id": user["id"]})
@@ -82,11 +79,25 @@ async def get_ws_role(user_id: str, workspace_id: str) -> str:
     return mem.get("role") if mem else None
 
 
-def exchange_google_session(session_id: str) -> dict:
-    resp = requests.get(EMERGENT_SESSION_URL, headers={"X-Session-ID": session_id}, timeout=30)
-    if resp.status_code != 200:
-        raise HTTPException(status_code=401, detail="Invalid session")
-    return resp.json()
+def verify_google_id_token(credential: str) -> dict:
+    """Verify a Google ID token (JWT) obtained via Google Identity Services on the frontend.
+
+    Returns a dict with at least: email, name, picture.
+    """
+    client_id = os.environ.get("GOOGLE_CLIENT_ID")
+    if not client_id:
+        raise HTTPException(status_code=500, detail="Google login is not configured")
+    try:
+        info = id_token.verify_oauth2_token(credential, g_requests.Request(), client_id)
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=f"Invalid Google credential: {e}")
+    if not info.get("email_verified"):
+        raise HTTPException(status_code=401, detail="Google email is not verified")
+    return {
+        "email": info["email"],
+        "name": info.get("name") or info["email"].split("@")[0],
+        "picture": info.get("picture"),
+    }
 
 
 # Brute force protection
@@ -113,11 +124,52 @@ async def clear_login_attempts(identifier: str):
 
 
 async def seed_admin():
-    admin_email = os.environ.get("ADMIN_EMAIL", "admin@testify.com")
-    admin_password = os.environ.get("ADMIN_PASSWORD", "admin123")
+    """Ensure an admin user exists with the configured credentials.
+
+    Creates the admin + a default workspace on first run. Updates the password
+    if it doesn't match the environment on subsequent runs (idempotent).
+    """
+    from models import gen_id, now_iso
+    from pymongo.errors import DuplicateKeyError
+
+    admin_email = os.environ.get("ADMIN_EMAIL")
+    admin_password = os.environ.get("ADMIN_PASSWORD")
+    if not admin_email or not admin_password:
+        return
+    admin_email = admin_email.lower()
     existing = await db.users.find_one({"email": admin_email})
     if existing is None:
-        return  # created via seed.py with full demo workspace/data
+        uid = gen_id("user_")
+        await db.users.insert_one({
+            "id": uid,
+            "name": "Admin",
+            "email": admin_email,
+            "password_hash": hash_password(admin_password),
+            "avatar": None,
+            "auth_provider": "email",
+            "role": "owner",
+            "email_verified": True,
+            "onboarded": True,
+            "created_at": now_iso(),
+            "updated_at": now_iso(),
+        })
+        ws_id = gen_id("ws_")
+        try:
+            await db.workspaces.insert_one({
+                "id": ws_id, "owner_id": uid, "name": "Admin Workspace",
+                "slug": f"admin-{ws_id[-6:]}", "logo_url": None,
+                "primary_color": "#ff5722", "secondary_color": "#151515",
+                "button_color": "#ff5722", "plan": "business",
+                "created_at": now_iso(), "updated_at": now_iso(),
+            })
+            await db.workspace_members.insert_one({
+                "id": gen_id("wm_"), "workspace_id": ws_id, "user_id": uid,
+                "role": "owner", "created_at": now_iso(),
+            })
+        except DuplicateKeyError:
+            pass
+        return
+    # Rotate password if env changed
     if not verify_password(admin_password, existing.get("password_hash", "")):
         await db.users.update_one(
             {"email": admin_email}, {"$set": {"password_hash": hash_password(admin_password)}}

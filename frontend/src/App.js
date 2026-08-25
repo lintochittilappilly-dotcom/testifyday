@@ -1,6 +1,6 @@
-import React, { useEffect, useRef } from "react";
+import React from "react";
 import "@/App.css";
-import { BrowserRouter, Routes, Route, useLocation, useNavigate, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { ThemeProvider } from "@/context/ThemeContext";
@@ -35,28 +35,6 @@ function LoadingScreen() {
   );
 }
 
-function AuthCallback() {
-  const navigate = useNavigate();
-  const { googleAuth } = useAuth();
-  const done = useRef(false);
-  useEffect(() => {
-    if (done.current) return;
-    done.current = true;
-    const hash = window.location.hash;
-    const match = hash.match(/session_id=([^&]+)/);
-    (async () => {
-      try {
-        const user = await googleAuth(decodeURIComponent(match[1]));
-        window.history.replaceState(null, "", window.location.pathname);
-        navigate(user.onboarded ? "/dashboard" : "/onboarding", { replace: true });
-      } catch (e) {
-        navigate("/login", { replace: true });
-      }
-    })();
-  }, []); // eslint-disable-line
-  return <LoadingScreen />;
-}
-
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
   if (loading || user === null) return <LoadingScreen />;
@@ -72,8 +50,6 @@ function GuestRoute({ children }) {
 }
 
 function AppRouter() {
-  const location = useLocation();
-  if (location.hash?.includes("session_id=")) return <AuthCallback />;
   return (
     <Routes>
       <Route path="/" element={<Landing />} />

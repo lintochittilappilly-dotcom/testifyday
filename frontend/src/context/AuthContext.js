@@ -26,10 +26,6 @@ export function AuthProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    if (window.location.hash?.includes("session_id=")) {
-      setLoading(false);
-      return;
-    }
     checkAuth();
   }, [checkAuth]);
 
@@ -47,8 +43,8 @@ export function AuthProvider({ children }) {
     const { data } = await api.post("/auth/register", { name, email, password });
     return persist(data);
   };
-  const googleAuth = async (session_id) => {
-    const { data } = await api.post("/auth/google", { session_id });
+  const googleAuth = async (credential) => {
+    const { data } = await api.post("/auth/google", { credential });
     return persist(data);
   };
   const logout = async () => {
