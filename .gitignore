@@ -17,6 +17,9 @@ venv/
 .railway
 .env.*
 *.env
+!frontend/.env.production
+!backend/.env.example
+!frontend/.env.example
 credentials.json
 *.pem
 *.key
