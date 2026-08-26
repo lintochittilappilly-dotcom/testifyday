@@ -1,14 +1,28 @@
 """S3-compatible object storage for user uploads (avatars, testimonial images/videos)."""
 import os
+import re
 import boto3
 from botocore.client import Config
 
 APP_NAME = "testify"
 
-_BUCKET = os.environ.get("S3_BUCKET_NAME")
-_REGION = os.environ.get("AWS_REGION", "us-east-1")
+_REGION_RE = re.compile(r"\b[a-z]{2}-[a-z]+(?:-[a-z]+)?-\d+\b")
+
+
+def _clean_region(raw: str) -> str:
+    """Accept either 'us-east-1' or 'US East (N. Virginia) us-east-1' — extract the code.
+    Falls back to 'us-east-1' when no valid AWS region code is present."""
+    if not raw:
+        return "us-east-1"
+    raw = raw.strip()
+    m = _REGION_RE.search(raw.lower())
+    return m.group(0) if m else "us-east-1"
+
+
+_BUCKET = (os.environ.get("S3_BUCKET_NAME") or "").strip()
+_REGION = _clean_region(os.environ.get("AWS_REGION", "us-east-1"))
 _PUBLIC_BASE = (os.environ.get("S3_PUBLIC_URL") or "").rstrip("/")
-_ENDPOINT = os.environ.get("S3_ENDPOINT_URL") or None  # Cloudflare R2 / MinIO override
+_ENDPOINT = (os.environ.get("S3_ENDPOINT_URL") or "").strip() or None  # R2 / MinIO override
 
 _client = None
 

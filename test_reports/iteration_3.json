@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 3 backend-only testing of the AWS_REGION normalization fix in backend/storage.py. Added /app/backend/tests/test_storage_region.py (11 tests) covering all 7 requested _clean_region cases, fresh importlib.reload with AWS_REGION='US East (N. Virginia) us-east-1' (module _REGION resolves to 'us-east-1'), init_storage() RuntimeError containing 'S3_BUCKET_NAME' with no bucket configured, and public_url fallback. Re-ran the full previous suite as regression. Result: 46/46 passed (35 prior regression tests + 11 new), 0 failures. No API endpoints hit S3; backend not restarted.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "backend/storage.py::_clean_region", "issue": "Regex [a-z]{2}-[a-z]+-\\d+ mis-parses 4-segment AWS regions: 'us-gov-west-1' -> 'ov-west-1' and 'US GovCloud (US-West) us-gov-west-1' -> 'ov-west-1' (invalid region, boto3 would fail). Suggest r'\\b[a-z]{2}-[a-z]+(?:-[a-z]+)?-\\d+\\b'. Not blocking for the reported us-east-1 case."},
+      {"endpoint": "backend/storage.py::_clean_region", "issue": "On no regex match the raw string is returned verbatim (e.g. 'garbage-value'), so a truly bad AWS_REGION still reaches boto3 and reproduces the original 'doesn't match a supported format' warning instead of falling back to 'us-east-1'. Consider falling back to the default + logging a warning."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_storage_region.py",
+    "/app/test_reports/pytest/pytest_results_iter3.xml"
+  ],
+  "action_items": [
+    "Optional hardening: broaden _clean_region regex to support 4-segment regions (us-gov-west-1) and fall back to 'us-east-1' when no valid region code is found."
+  ],
+  "critical_code_review_comments": [
+    "_REGION/_BUCKET/_ENDPOINT are read at import time only; env changes require a process restart (acceptable for Railway, but init_storage(force=True) currently ignores the force flag and cached _client is never reset).",
+    "init_storage() failure is swallowed by a warning in server.py:1351 — uploads will fail later at request time with a raw boto error; consider surfacing a clear 503 for media endpoints when storage is unconfigured."
+  ],
+  "updated_files": ["/app/backend/tests/test_storage_region.py"],
+  "success_rate": {"backend": "100% (46/46)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "None new; existing suite self-seeds test_*@example.com users and cleans up via session fixture.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "admin@testify.day / AdminTest123! (from /app/memory/test_credentials.md)",
+  "context_for_next_testing_agent": "Full backend suite lives at /app/backend/tests/ and is green (46 tests, ~53s). New file test_storage_region.py reloads the storage module via importlib with monkeypatched env and always reloads back to the original state in a finally block — keep that pattern to avoid leaking env into other tests. S3 head_bucket path is intentionally untested (no real credentials).",
+  "rca_of_the_issue": "Railway env var AWS_REGION was set to the AWS console display label 'US East (N. Virginia) us-east-1'; boto3 rejects non-conforming region_name, so init_storage logged 'Storage init skipped'. The _clean_region() regex extraction now normalizes the label to 'us-east-1' at module import; verified by fresh importlib.reload test. Residual gap: unmatched/4-segment inputs are not normalized (see minor issues)."
+}
