@@ -55,6 +55,9 @@ export default function TestimonialDetail() {
           {t.video_url && (
             <div className="rounded-2xl overflow-hidden bg-black border border-border"><video src={mediaUrl(t.video_url)} controls className="w-full max-h-[480px]" /></div>
           )}
+          {!t.video_url && t.image_url && (
+            <div className="rounded-2xl overflow-hidden bg-black border border-border"><img src={mediaUrl(t.image_url)} alt="" className="w-full max-h-[480px] object-contain" /></div>
+          )}
           <div className="p-6 rounded-2xl border border-border bg-card space-y-4">
             <h3 className="font-heading font-semibold">Public content</h3>
             <div className="grid sm:grid-cols-2 gap-4">
@@ -83,7 +86,7 @@ export default function TestimonialDetail() {
             <dl className="space-y-2.5 text-sm">
               <Row k="Status"><StatusBadge status={t.status} /></Row>
               {t.rating ? <Row k="Rating"><span className="flex gap-0.5">{[1,2,3,4,5].map(i => <StarIcon key={i} size={13} className={i <= t.rating ? "text-primary" : "text-muted"} fill={i <= t.rating ? "currentColor" : "transparent"} />)}</span></Row> : null}
-              <Row k="Type">{t.video_url ? "Video" : "Written"}</Row>
+              <Row k="Type">{t.video_url ? "Video" : t.image_url ? "Image" : "Written"}</Row>
               <Row k="Source">{t.source}</Row>
               <Row k="Submitted">{t.submitted_at && format(new Date(t.submitted_at), "MMM d, yyyy")}</Row>
               <Row k="Consent">{t.consent ? <span className="inline-flex items-center gap-1 text-emerald-500"><ShieldCheck size={14} /> Given</span> : "No"}</Row>

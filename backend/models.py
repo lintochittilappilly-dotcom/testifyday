@@ -111,6 +111,7 @@ class TestimonialSubmit(BaseModel):
     avatar_url: Optional[str] = None
     website: Optional[str] = ""
     text: Optional[str] = ""
+    image_url: Optional[str] = None
     video_url: Optional[str] = None
     video_thumbnail_url: Optional[str] = None
     rating: Optional[int] = None
@@ -126,6 +127,7 @@ class TestimonialUpdate(BaseModel):
     company: Optional[str] = None
     role: Optional[str] = None
     text: Optional[str] = None
+    image_url: Optional[str] = None
     rating: Optional[int] = None
     notes: Optional[str] = None
     status: Optional[str] = None
@@ -183,6 +185,9 @@ class SettingsInput(BaseModel):
     resend_api_key: Optional[str] = None
     sender_email: Optional[str] = None
     google_places_api_key: Optional[str] = None
+    checkout_coupon_id: Optional[str] = None
+    promo_banner: Optional[str] = None
+    plans_override: Optional[List[Dict[str, Any]]] = None
 
 
 class CheckoutInput(BaseModel):

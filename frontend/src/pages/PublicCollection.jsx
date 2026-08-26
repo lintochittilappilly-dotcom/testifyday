@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Video, PenLine, Star, Loader2, Heart, ArrowLeft, Upload, Check, AlertTriangle } from "lucide-react";
+import { Video, PenLine, Image as ImageIcon, Star, Loader2, Heart, ArrowLeft, Upload, Check, AlertTriangle, X } from "lucide-react";
 import { toast } from "sonner";
 
 const RECAPTCHA_KEY = process.env.REACT_APP_RECAPTCHA_SITE_KEY || "";
@@ -25,6 +25,8 @@ export default function PublicCollection() {
 
   const [form, setForm] = useState({ first_name: "", last_name: "", email: "", company: "", role: "", website: "", text: "", rating: 0, consent: false, honeypot: "" });
   const [videoUrl, setVideoUrl] = useState(null);
+  const [imageUrl, setImageUrl] = useState(null);
+  const [imageUploading, setImageUploading] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState(null);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [captcha, setCaptcha] = useState(null);
@@ -66,15 +68,34 @@ export default function PublicCollection() {
     finally { setAvatarUploading(false); }
   };
 
+  const uploadImage = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { toast.error("Image must be under 5 MB."); return; }
+    setImageUploading(true);
+    try {
+      const fd = new FormData(); fd.append("file", file);
+      const { data } = await api.post("/upload", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      setImageUrl(data.url);
+    } catch (err) { toast.error(formatApiError(err)); }
+    finally { setImageUploading(false); }
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     if (!form.consent) { toast.error("Please give consent to submit."); return; }
     if (mode === "text" && !form.text.trim()) { toast.error("Please write your testimonial."); return; }
+    if (mode === "image" && !imageUrl) { toast.error("Please upload an image first."); return; }
     if (mode === "video" && !videoUrl) { toast.error("Please record or upload your video first."); return; }
     setSubmitting(true);
     try {
       const { data } = await api.post(`/public/collection/${slug}/submit`, {
-        ...form, video_url: videoUrl, avatar_url: avatarUrl, rating: form.rating || null, recaptcha_token: captcha,
+        ...form,
+        video_url: mode === "video" ? videoUrl : null,
+        image_url: mode === "image" ? imageUrl : null,
+        avatar_url: avatarUrl,
+        rating: form.rating || null,
+        recaptcha_token: captcha,
       });
       setDone(data);
       setStatus("done");
@@ -125,6 +146,10 @@ export default function PublicCollection() {
                   <div><div className="font-semibold text-white">Record a video</div><div className="text-white/50 text-sm">Most impactful — takes under a minute</div></div>
                 </button>
               )}
+              <button onClick={() => setMode("image")} data-testid="pick-image" className="w-full p-5 rounded-2xl bg-white/5 border border-white/10 hover:border-white/25 transition-colors text-left flex items-center gap-4 active:scale-[0.99]">
+                <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: accent }}><ImageIcon className="text-white" size={20} /></div>
+                <div><div className="font-semibold text-white">Share an image</div><div className="text-white/50 text-sm">Upload a photo or screenshot with a short caption</div></div>
+              </button>
               {col.allow_text && (
                 <button onClick={() => setMode("text")} data-testid="pick-text" className="w-full p-5 rounded-2xl bg-white/5 border border-white/10 hover:border-white/25 transition-colors text-left flex items-center gap-4 active:scale-[0.99]">
                   <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 bg-white/10"><PenLine className="text-white" size={20} /></div>
@@ -139,6 +164,29 @@ export default function PublicCollection() {
               <button type="button" onClick={() => setMode(null)} className="flex items-center gap-1.5 text-white/50 hover:text-white text-sm mb-2"><ArrowLeft size={15} /> Back</button>
 
               {mode === "video" && <VideoRecorder accent={accent} onUploaded={setVideoUrl} />}
+
+              {mode === "image" && (
+                <div>
+                  <Label className="text-white/70 mb-2 block">Upload an image</Label>
+                  {imageUrl ? (
+                    <div className="relative rounded-2xl overflow-hidden border border-white/10">
+                      <img src={mediaUrl(imageUrl)} alt="" className="w-full max-h-72 object-cover" />
+                      <button type="button" onClick={() => setImageUrl(null)} className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/60 flex items-center justify-center text-white hover:bg-black/80" data-testid="remove-image"><X size={16} /></button>
+                    </div>
+                  ) : (
+                    <label className="flex items-center justify-center gap-2 p-8 rounded-2xl bg-white/5 border-2 border-dashed border-white/15 cursor-pointer hover:border-white/30 transition-colors" data-testid="image-upload">
+                      {imageUploading ? <Loader2 className="animate-spin text-white/60" size={20} /> : <><Upload className="text-white/60" size={20} /><span className="text-white/60 text-sm">Tap to choose an image (max 5 MB)</span></>}
+                      <input type="file" accept="image/*" className="hidden" onChange={uploadImage} />
+                    </label>
+                  )}
+                  <div className="mt-3">
+                    <Label className="text-white/70 mb-2 block">Caption (optional)</Label>
+                    <Textarea value={form.text} onChange={(e) => set("text", e.target.value)} maxLength={500} rows={3}
+                      placeholder="Add a short caption to your image..." data-testid="image-caption"
+                      className="bg-white/5 border-white/10 text-white placeholder:text-white/30 resize-none" />
+                  </div>
+                </div>
+              )}
 
               {mode === "text" && (
                 <div>

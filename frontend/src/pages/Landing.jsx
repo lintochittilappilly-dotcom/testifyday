@@ -1,8 +1,9 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import Marquee from "react-fast-marquee";
 import Logo from "@/components/Logo";
+import api from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import {
@@ -41,12 +42,6 @@ const FEATURES = [
 ];
 
 const USE_CASES = ["SaaS", "Agencies", "Coaches", "Course creators", "Freelancers", "Ecommerce", "Startups", "Consultants", "Local business"];
-
-const PRICING = [
-  { name: "Free", price: "$0", period: "forever", features: ["1 collection page", "Up to 20 testimonials", "1 basic widget", "Testify branding"], cta: "Start free" },
-  { name: "Pro", price: "$29", period: "/mo", featured: true, features: ["Unlimited collection pages", "Unlimited testimonials", "Video testimonials", "Unlimited widgets", "Custom branding", "Analytics", "Remove Testify branding"], cta: "Start free trial" },
-  { name: "Business", price: "$79", period: "/mo", features: ["Everything in Pro", "Team members", "Advanced analytics", "Custom domain", "Priority support", "Advanced customization"], cta: "Start free trial" },
-];
 
 const FAQ = [
   { q: "Do my customers need an account?", a: "No. They just open your link, record or write a testimonial, and submit. It takes under two minutes." },
@@ -88,9 +83,27 @@ function Nav() {
 }
 
 export default function Landing() {
+  const [pricing, setPricing] = useState([]);
+  const [promo, setPromo] = useState("");
+  useEffect(() => {
+    (async () => {
+      try {
+        const [plansRes, cfgRes] = await Promise.all([
+          api.get("/plans"),
+          api.get("/public/config").catch(() => ({ data: {} })),
+        ]);
+        setPricing(plansRes.data || []);
+        setPromo((cfgRes.data && cfgRes.data.promo_banner) || "");
+      } catch (e) { /* fall back to empty */ }
+    })();
+  }, []);
+
   return (
     <div className="dark bg-background text-foreground min-h-screen">
       <Nav />
+      {promo && (
+        <div className="bg-primary text-white text-center text-sm py-2 px-4" data-testid="promo-banner">{promo}</div>
+      )}
 
       {/* Hero */}
       <section className="relative overflow-hidden grain">
@@ -196,15 +209,20 @@ export default function Landing() {
           <h2 className="font-heading text-3xl sm:text-4xl font-bold tracking-tight">Simple pricing that scales with you</h2>
         </div>
         <div className="grid md:grid-cols-3 gap-6 items-start">
-          {PRICING.map((p) => (
-            <div key={p.name} className={`p-8 rounded-3xl border ${p.featured ? "border-primary bg-primary/[0.06] relative" : "border-white/10 bg-white/[0.02]"}`}>
-              {p.featured && <div className="absolute -top-3 left-8 px-3 py-1 rounded-full bg-primary text-white text-xs font-semibold">Most popular</div>}
-              <h3 className="font-heading text-lg font-semibold mb-1">{p.name}</h3>
-              <div className="flex items-end gap-1 mb-6"><span className="font-heading text-4xl font-bold">{p.price}</span><span className="text-white/50 text-sm mb-1">{p.period}</span></div>
-              <Link to="/register"><Button className="w-full mb-6" variant={p.featured ? "default" : "outline"} data-testid={`pricing-${p.name.toLowerCase()}`}>{p.cta}</Button></Link>
-              <ul className="space-y-3">{p.features.map((f) => <li key={f} className="flex items-start gap-2 text-sm text-white/70"><Check size={16} className="text-primary mt-0.5 flex-shrink-0" /> {f}</li>)}</ul>
-            </div>
-          ))}
+          {pricing.map((p) => {
+            const isFree = p.id === "free";
+            const priceLabel = isFree ? "$0" : `$${p.price_monthly}`;
+            const period = isFree ? "forever" : "/mo";
+            return (
+              <div key={p.id} className={`p-8 rounded-3xl border ${p.featured ? "border-primary bg-primary/[0.06] relative" : "border-white/10 bg-white/[0.02]"}`}>
+                {p.featured && <div className="absolute -top-3 left-8 px-3 py-1 rounded-full bg-primary text-white text-xs font-semibold">Most popular</div>}
+                <h3 className="font-heading text-lg font-semibold mb-1">{p.name}</h3>
+                <div className="flex items-end gap-1 mb-6"><span className="font-heading text-4xl font-bold">{priceLabel}</span><span className="text-white/50 text-sm mb-1">{period}</span></div>
+                <Link to="/register"><Button className="w-full mb-6" variant={p.featured ? "default" : "outline"} data-testid={`pricing-${p.id}`}>{p.cta || (isFree ? "Start free" : "Start free trial")}</Button></Link>
+                <ul className="space-y-3">{(p.features || []).map((f) => <li key={f} className="flex items-start gap-2 text-sm text-white/70"><Check size={16} className="text-primary mt-0.5 flex-shrink-0" /> {f}</li>)}</ul>
+              </div>
+            );
+          })}
         </div>
       </section>
 

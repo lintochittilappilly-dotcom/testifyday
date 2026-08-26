@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 2 backend-only retest of the four defects from iteration_1.json. All four are FIXED and verified: (1) image_url is now returned by /api/public/wall/{ws_slug} and /api/public/widget/{wid} (verified end-to-end: image-only submit on a Free-plan workspace -> approve -> both public payloads carry the exact image_url, no _id leakage); (2) /api/public/collection/{slug} now gates allow_video by workspace plan (free -> false even when the collection has allow_video=true; pro and business -> true; collection-level allow_video=false still wins on paid plans); (3) GET /api/health returns {\"status\":\"ok\"} 200 and the legacy root /health still works; (4) require_admin and public_user fail closed - with ADMIN_EMAIL commented out of backend/.env and the backend restarted, a freshly registered admin@testify.com user got is_admin=false in the register/login and /api/auth/me payloads and 403 on both GET and PUT /api/admin/settings. Env file and backend were restored afterwards (verified ADMIN_EMAIL=admin@testify.day, /api/health 200, admin login OK). Full regression: 33/33 tests pass (26 previous incl. the formerly-failing image_url test + 7 new) plus 2 fail-closed tests = 35/35 green. Stripe/Google untested (unconfigured), per request.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PUT /api/admin/settings", "issue": "STILL OPEN from iteration 1 (not part of this iteration's scope): plans_override is List[Dict[str, Any]] in models.py:190 with no per-field validation, so price_monthly can be stored as an arbitrary string and is echoed verbatim by GET /api/plans. Recommend a typed PlanOverride model."},
+      {"endpoint": "POST /api/public/collection/{slug}/submit", "issue": "STILL OPEN: in-process rate limiter (defaultdict, 5 calls/300s per client IP) counts rejected calls and is not shared across workers/replicas. QA has to restart the backend to clear it. Move to Mongo/Redis-backed counters before scaling out."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration2_fixes.py",
+    "/app/backend/tests/test_admin_failclosed.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/test_plan_gating.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Optional (carry-over, non-blocking): add a typed PlanOverride pydantic model for plans_override entries",
+    "Optional (carry-over, non-blocking): move the submit rate limiter out of process memory"
+  ],
+  "critical_code_review_comments": [
+    "server.py is 1361 lines - still above the 700-line guideline; split into routers (auth, collections, testimonials, widgets, admin, payments, public)",
+    "/health and /api/health are two separate handlers returning the same literal - fine, but consider one handler registered on both paths",
+    "public_user() and require_admin() now derive admin from os.environ ADMIN_EMAIL at call time (good: fail-closed, no hardcoded fallback). Note seed_admin() silently no-ops when ADMIN_EMAIL is unset and only logs at error level - document that a missing ADMIN_EMAIL means no admin at all",
+    "_public_testimonial remains the single serializer for public payloads; keep adding every new media field there (image_url regression is now covered by tests in test_iteration2_fixes.py and test_plan_gating.py)"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration2_fixes.py (new)",
+    "/app/backend/tests/test_admin_failclosed.py (new)"
+  ],
+  "success_rate": {"backend": "100% (35/35 tests: 33 in the main run + 2 fail-closed)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "Registered throwaway users test_it2free_*/test_it2pro_*@example.com (TestPass123!) with published collections, one image testimonial, one grid widget; one pro/business workspace promoted via db.workspaces.update_one; a temporary admin@testify.com user for the fail-closed test. All removed - verified 0 residual test_ users, admin@testify.com deleted, platform_settings back to defaults.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "/app/memory/test_credentials.md now exists and is accurate: admin admin@testify.day / AdminTest123!; test users registered on the fly as test_*@example.com / TestPass123!",
+  "context_for_next_testing_agent": "Backend at http://localhost:8001 under supervisor; there is still no /app/frontend/.env with REACT_APP_BACKEND_URL, so frontend testing needs that first (frontend service was FATAL in iteration 1). Tests: conftest.py (BASE_URL/api, admin_token, free_user, mongo, reset_rate_limit which restarts the backend to clear the in-memory submit rate limit), backend_test.py, test_plan_gating.py, test_iteration2_fixes.py (health, allow_video plan gating, image_url in wall+widget). test_admin_failclosed.py MUST be run on its own (it rewrites /app/backend/.env to drop ADMIN_EMAIL, restarts the backend, then restores both) - do not run it in the same session as admin_token-dependent tests. Run with `-p no:randomly` for stable ordering. Still unverified: Stripe /api/payments/* (no STRIPE_SECRET_KEY), Google OAuth (no GOOGLE_CLIENT_ID), S3 uploads (no S3_BUCKET_NAME - storage init warns and is skipped, so real file upload endpoints were not exercised; image_url tests used external URLs).",
+  "rca_of_the_issue": "All four iteration-1 root causes are addressed in code and confirmed by tests: image_url added to _public_testimonial (server.py ~951); _public_collection (~854) computes allow_video = col.allow_video AND _is_unlimited(ws.plan); a duplicate @app.get('/api/health') route added (server.py 1339) so the ingress /api prefix resolves; public_user (82) and require_admin (89) read ADMIN_EMAIL and treat an empty value as 'no admin exists' instead of falling back to admin@testify.com."
+}

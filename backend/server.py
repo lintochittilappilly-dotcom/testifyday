@@ -29,7 +29,7 @@ from email_service import (
     team_invite_email,
 )
 from captcha import verify_recaptcha
-from settings_store import get_settings, get_setting, update_settings
+from settings_store import get_settings, get_setting, update_settings, get_plans
 import stripe
 import requests
 
@@ -79,16 +79,17 @@ async def unique_slug(collection, base: str, exclude_id=None) -> str:
 
 
 def public_user(u: dict) -> dict:
-    admin_email = os.environ.get("ADMIN_EMAIL", "admin@testify.com")
+    admin_email = (os.environ.get("ADMIN_EMAIL") or "").lower().strip()
     base = {k: u.get(k) for k in ["id", "name", "email", "avatar", "role", "auth_provider", "created_at"]}
-    base["is_admin"] = u.get("email") == admin_email
+    base["is_admin"] = bool(admin_email) and (u.get("email") or "").lower() == admin_email
     base["onboarded"] = u.get("onboarded", False)
     return base
 
 
 async def require_admin(request: Request) -> dict:
     user = await authlib.get_current_user(request)
-    if user.get("email") != os.environ.get("ADMIN_EMAIL", "admin@testify.com"):
+    admin_email = (os.environ.get("ADMIN_EMAIL") or "").lower().strip()
+    if not admin_email or (user.get("email") or "").lower() != admin_email:
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
 
@@ -550,12 +551,6 @@ async def import_testimonial(data: m.ManualImportInput, request: Request):
 
 
 # ---------- Admin / Platform settings ----------
-@api.get("/public/config")
-async def public_config():
-    s = await get_settings()
-    return {"recaptcha_site_key": s.get("recaptcha_site_key", "")}
-
-
 @api.get("/admin/settings")
 async def admin_get_settings(request: Request):
     await require_admin(request)
@@ -849,13 +844,15 @@ async def media(path: str):
 
 # ---------- Public collection ----------
 def _public_collection(col: dict, ws: dict) -> dict:
+    plan = ws.get("plan", "free")
     return {
         "id": col["id"], "name": col["name"], "slug": col["slug"],
         "headline": col.get("headline"), "description": col.get("description"),
         "logo_url": col.get("logo_url") or ws.get("logo_url"),
         "brand_color": col.get("brand_color"), "background_color": col.get("background_color"),
         "welcome_video_url": col.get("welcome_video_url"),
-        "allow_video": col.get("allow_video", True), "allow_text": col.get("allow_text", True),
+        "allow_video": col.get("allow_video", True) and _is_unlimited(plan),
+        "allow_text": col.get("allow_text", True),
         "require_email": col.get("require_email", True), "require_company": col.get("require_company", False),
         "require_role": col.get("require_role", False), "collect_rating": col.get("collect_rating", True),
         "custom_questions": col.get("custom_questions", []),
@@ -888,8 +885,8 @@ async def submit_testimonial(slug: str, data: m.TestimonialSubmit, request: Requ
         raise HTTPException(status_code=404, detail="Collection page not found")
     if not verify_recaptcha(data.recaptcha_token, await get_setting("recaptcha_secret_key")):
         raise HTTPException(status_code=400, detail="Captcha verification failed. Please try again.")
-    if not data.text and not data.video_url:
-        raise HTTPException(status_code=400, detail="Please provide a written or video testimonial")
+    if not data.text and not data.video_url and not data.image_url:
+        raise HTTPException(status_code=400, detail="Please provide a written, image or video testimonial")
     if not data.consent:
         raise HTTPException(status_code=400, detail="Consent is required to submit")
     if col.get("require_email") and not (data.email or "").strip():
@@ -899,9 +896,12 @@ async def submit_testimonial(slug: str, data: m.TestimonialSubmit, request: Requ
     if col.get("require_role") and not (data.role or "").strip():
         raise HTTPException(status_code=400, detail="Job title is required")
     ws = await db.workspaces.find_one({"id": col["workspace_id"]}, {"_id": 0})
-    if not _is_unlimited(ws.get("plan", "free")):
-        if await db.testimonials.count_documents({"workspace_id": ws["id"]}) >= 20:
-            raise HTTPException(status_code=402, detail="This business has reached its testimonial limit. Please try again later.")
+    plan = ws.get("plan", "free")
+    if not _is_unlimited(plan):
+        if data.video_url:
+            raise HTTPException(status_code=402, detail="Video testimonials are a paid feature. This business is on the Free plan.")
+        if await db.testimonials.count_documents({"workspace_id": ws["id"]}) >= 5:
+            raise HTTPException(status_code=402, detail="This business has reached its Free plan limit of 5 testimonials. Please try again later.")
     doc = {
         "id": m.gen_id("tst_"),
         "workspace_id": ws["id"],
@@ -914,6 +914,7 @@ async def submit_testimonial(slug: str, data: m.TestimonialSubmit, request: Requ
         "website": (data.website or "").strip(),
         "avatar_url": data.avatar_url,
         "text": (data.text or "").strip(),
+        "image_url": data.image_url,
         "video_url": data.video_url,
         "video_thumbnail_url": data.video_thumbnail_url,
         "rating": data.rating,
@@ -951,7 +952,7 @@ def _public_testimonial(t: dict) -> dict:
     return {
         "id": t["id"], "first_name": t.get("first_name"), "last_name": t.get("last_name"),
         "company": t.get("company"), "role": t.get("role"), "avatar_url": t.get("avatar_url"),
-        "text": t.get("text"), "video_url": t.get("video_url"),
+        "text": t.get("text"), "image_url": t.get("image_url"), "video_url": t.get("video_url"),
         "video_thumbnail_url": t.get("video_thumbnail_url"), "rating": t.get("rating"),
         "featured": t.get("featured"),
     }
@@ -1186,17 +1187,16 @@ async def remove_domain(request: Request):
 # ---------- Payments (Stripe subscriptions) ----------
 @api.get("/plans")
 async def list_plans():
-    return [
-        {"id": "free", "name": "Free", "price_monthly": 0, "price_yearly": 0,
-         "lookup_monthly": None, "lookup_yearly": None,
-         "features": ["1 collection page", "Up to 20 testimonials", "1 basic widget", "Testify branding"]},
-        {"id": "pro", "name": "Pro", "price_monthly": 29, "price_yearly": 290,
-         "lookup_monthly": "pro_monthly", "lookup_yearly": "pro_yearly",
-         "features": ["Unlimited collection pages", "Unlimited testimonials", "Video testimonials", "Unlimited widgets", "Custom branding", "Analytics", "Remove Testify branding"]},
-        {"id": "business", "name": "Business", "price_monthly": 79, "price_yearly": 790,
-         "lookup_monthly": "business_monthly", "lookup_yearly": "business_yearly",
-         "features": ["Everything in Pro", "Team members", "Advanced analytics", "Custom domain", "Priority support", "Advanced customization"]},
-    ]
+    return await get_plans()
+
+
+@api.get("/public/config")
+async def public_config():
+    s = await get_settings()
+    return {
+        "recaptcha_site_key": s.get("recaptcha_site_key", ""),
+        "promo_banner": s.get("promo_banner", ""),
+    }
 
 
 @api.post("/payments/checkout")
@@ -1210,6 +1210,8 @@ async def create_checkout(data: m.CheckoutInput, request: Request):
         raise HTTPException(status_code=500, detail="Plan price not configured")
     price = prices[0]
     origin = data.origin_url.rstrip("/")
+    coupon_id = (await get_setting("checkout_coupon_id") or "").strip()
+    discounts = [{"coupon": coupon_id}] if coupon_id else None
     kwargs = dict(
         line_items=[{"price": price.id, "quantity": 1}],
         mode="subscription",
@@ -1217,6 +1219,10 @@ async def create_checkout(data: m.CheckoutInput, request: Request):
         cancel_url=f"{origin}/payment/cancel",
         metadata={"user_id": user["id"], "workspace_id": ws["id"], "lookup_key": data.lookup_key},
     )
+    if discounts:
+        kwargs["discounts"] = discounts
+    else:
+        kwargs["allow_promotion_codes"] = True
     try:
         session = stripe.checkout.Session.create(**kwargs, managed_payments={"enabled": True})
     except stripe.error.InvalidRequestError as e:
@@ -1327,6 +1333,11 @@ app.add_middleware(
 
 @app.get("/health")
 async def health():
+    return {"status": "ok"}
+
+
+@app.get("/api/health")
+async def api_health():
     return {"status": "ok"}
 
 

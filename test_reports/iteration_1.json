@@ -1,0 +1,46 @@
+{
+  "summary": "Backend-only testing of the Testify iteration (admin-editable plans/pricing, promo banner + checkout coupon, image testimonials, tightened Free plan). Environment had NO backend/.env, so the backend was crash-looping (KeyError: MONGO_URL); I created /app/backend/.env (local mongo, ADMIN_EMAIL/ADMIN_PASSWORD, blank recaptcha/stripe keys) and restarted supervisor backend. Wrote a pytest suite (26 tests) covering /api/plans, /api/admin/settings RBAC + persistence + plans_override merge, /api/public/config, free/paid plan submit gating, image/text/video submissions, 5-testimonial cap, captcha fallback, and auth/collections/testimonials regression. 25/26 passed. Single failure is a genuine product defect: image_url is never returned by the public wall/widget APIs, so image testimonials cannot render on embeds.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "GET /api/public/wall/{ws_slug} and GET /api/public/widget/{wid}", "issue": "_public_testimonial() (server.py ~line 946) does not include image_url, so approved image testimonials are returned with empty text/video and render as blank cards. frontend/src/components/TestimonialWidget.jsx already expects t.image_url, so the new image-testimonial feature is broken end-to-end on public embeds/walls. Reproduced: submit image-only testimonial -> approve -> GET /api/public/wall/{slug} returns item without image_url.", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "GET /api/public/collection/{slug}", "issue": "Payload does not reflect the workspace plan; a Free-plan collection still returns allow_video=true, so PublicCollection.jsx shows the 'Record a video' option and the visitor only gets the 402 'Video is a paid feature' AFTER recording/uploading. Suggest returning allow_video = col.allow_video AND plan in (pro,business)."},
+      {"endpoint": "GET /health", "issue": "Health route is mounted on the app root (/health) instead of /api/health, so it is unreachable through the /api ingress prefix (GET /api/health -> 404)."},
+      {"endpoint": "PUT /api/admin/settings", "issue": "plans_override items are Dict[str, Any] with no per-field validation: price_monthly can be saved as an arbitrary string and is echoed verbatim by GET /api/plans (no 500, but bad data reaches the pricing UI). Recommend a typed PlanOverride model."},
+      {"endpoint": "require_admin / public_user (server.py 82, 91)", "issue": "Hardcoded fallback admin email 'admin@testify.com' when ADMIN_EMAIL is unset (env example uses admin@testify.day). If ADMIN_EMAIL is missing in production, anyone registering admin@testify.com gains admin. Should fail closed."},
+      {"endpoint": "POST /api/public/collection/{slug}/submit", "issue": "Rate limiter is in-process (defaultdict, 5 calls/300s per IP) and counts rejected calls too; with multiple uvicorn workers or a load balancer the limit is inconsistent and normal QA/testing hits 429. Not a blocker, noted for scaling."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Image testimonial displayed on public wall / embedded widget", "issue": "Backend public payload omits image_url while TestimonialWidget.jsx renders t.image_url -> image testimonials show as empty cards on embeds and /wall.", "affected_selectors": []},
+      {"flow": "Free-plan public collection page", "issue": "Video option is shown on Free workspaces (backend doesn't expose plan), leading to a 402 after the visitor already recorded a video.", "affected_selectors": []}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/conftest.py", "/app/backend/tests/backend_test.py", "/app/backend/tests/test_plan_gating.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Add image_url (and any other new media fields) to _public_testimonial() in server.py so public wall/widget/embed can render image testimonials",
+    "Expose effective allow_video on GET /api/public/collection/{slug} based on workspace plan so Free-plan pages hide video capture",
+    "Move /health under the /api router (or add /api/health) for ingress/uptime checks",
+    "Add typed validation for plans_override entries (numeric price_monthly/price_yearly, list[str] features)",
+    "Make ADMIN_EMAIL mandatory instead of falling back to hardcoded admin@testify.com",
+    "Commit a backend/.env (or document required env vars) - the app cannot boot without MONGO_URL/DB_NAME/JWT_SECRET; frontend is also FATAL in supervisor because /app/frontend/.env with REACT_APP_BACKEND_URL is missing"
+  ],
+  "critical_code_review_comments": [
+    "server.py is 1354 lines - split into routers (auth, collections, testimonials, admin, payments, public) per the 700-line guideline",
+    "_public_testimonial is the single source of truth for public payloads; every new testimonial field must be added there (image_url regression proves it)",
+    "settings_store.get_settings() treats 0/'' /[] as 'unset' and substitutes env defaults - an admin can never intentionally save an empty promo banner override distinct from default; works today only because defaults are also empty",
+    "Verified captcha.py: blank recaptcha secret returns True (graceful bypass) and a configured secret with no token returns 400 - behaves as documented, but blank-secret bypass in production means honeypot + rate limit are the only spam defenses"
+  ],
+  "updated_files": ["/app/backend/.env (created - local mongo, admin creds, blank third-party keys)", "/app/backend/tests/conftest.py", "/app/backend/tests/backend_test.py", "/app/backend/tests/test_plan_gating.py"],
+  "success_rate": {"backend": "96% (25/26 tests)", "frontend": "not tested (backend-only request; frontend service is FATAL - missing /app/frontend/.env)"},
+  "seed_data_creation": "Admin seeded from env (admin@testify.day / AdminTest123!). Test users registered with test_*@example.com prefix plus free-plan and pro-plan workspaces, published collections and testimonials; all removed by the session-scoped cleanup fixture in conftest.py. platform_settings reset to defaults (empty promo_banner/coupon/plans_override) after the run.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "/app/memory/test_credentials.md is MISSING. Credentials used come from the backend/.env I created: admin admin@testify.day / AdminTest123!; regular users are registered on the fly (test_*@example.com / TestPass123!).",
+  "context_for_next_testing_agent": "Backend runs under supervisor at http://localhost:8001 (no REACT_APP_BACKEND_URL / frontend .env exists). Tests live in /app/backend/tests: conftest.py (BASE_URL, admin_token, free_user, mongo, reset_rate_limit, session cleanup), backend_test.py (plans/admin settings/auth/free-plan submit), test_plan_gating.py (pro-plan submits, validation, captcha). The submit endpoint is rate limited to 5 calls/300s per IP - the reset_rate_limit fixture restarts the backend to clear the in-memory counter, so keep new submit tests behind that fixture. test_image_submit_and_public_wall_exposure is an intentionally failing test documenting the missing image_url in public payloads; it should pass once the main agent fixes _public_testimonial. Stripe endpoints (/api/payments/*) were not tested (no STRIPE_SECRET_KEY), so the auto-applied checkout coupon path is unverified end-to-end; only storage of checkout_coupon_id was verified. Google OAuth untested (no GOOGLE_CLIENT_ID).",
+  "rca_of_the_issue": "Root cause of the image-testimonial defect: the new image_url field was threaded through the submit handler, the Mongo document, models.py and the dashboard views, but the public serializer _public_testimonial() (used by /api/public/wall/{slug} and /api/public/widget/{wid}) was not updated, so the field is stripped from every public response. Fix: add 'image_url': t.get('image_url') to _public_testimonial(). Root cause of the boot failure: /app/backend/.env was absent and db.py reads os.environ['MONGO_URL'] at import time, crashing uvicorn on startup; mitigated by creating a local .env."
+}

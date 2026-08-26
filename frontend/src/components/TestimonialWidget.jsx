@@ -55,6 +55,14 @@ function Card({ t, cfg, isDark }) {
           <video src={mediaUrl(t.video_url)} controls playsInline poster={mediaUrl(t.video_thumbnail_url)}
             className="w-full h-full object-cover" preload="metadata" />
         </div>
+      ) : t.image_url ? (
+        <>
+          <div className="w-full rounded-lg overflow-hidden mb-3" style={{ background: "#000" }}>
+            <img src={mediaUrl(t.image_url)} alt="" className="w-full h-auto object-cover" />
+          </div>
+          {cfg.show_rating && <Stars rating={t.rating} color={cfg.accent_color} />}
+          {t.text && <p className="text-sm leading-relaxed mb-4" style={{ color: textColor }}>{t.text}</p>}
+        </>
       ) : (
         <>
           {cfg.show_rating && <Stars rating={t.rating} color={cfg.accent_color} />}

@@ -119,6 +119,10 @@ export default function Testimonials() {
                   <video src={mediaUrl(t.video_url)} className="w-full h-full object-cover" preload="metadata" />
                   <div className="absolute inset-0 flex items-center justify-center bg-black/30"><div className="w-10 h-10 rounded-full bg-white/90 flex items-center justify-center"><Play size={16} className="text-black ml-0.5" /></div></div>
                 </div>
+              ) : t.image_url ? (
+                <div className="rounded-xl overflow-hidden bg-black mb-3 cursor-pointer" style={{ aspectRatio: "16/10" }} onClick={() => navigate(`/dashboard/testimonials/${t.id}`)}>
+                  <img src={mediaUrl(t.image_url)} alt="" className="w-full h-full object-cover" />
+                </div>
               ) : (
                 <>
                   {t.rating ? <div className="flex gap-0.5 mb-2">{[1,2,3,4,5].map(i => <Star key={i} size={13} className={i <= t.rating ? "text-primary" : "text-muted"} fill={i <= t.rating ? "currentColor" : "transparent"} />)}</div> : null}

@@ -84,7 +84,6 @@ export default function Billing({ currentPlan = "free" }) {
           })}
         </div>
       )}
-      <p className="text-xs text-muted-foreground mt-4">Test mode — use card <code className="px-1 rounded bg-secondary">4242 4242 4242 4242</code>, any future expiry, CVC, ZIP, phone & email.</p>
     </div>
   );
 }
