@@ -551,8 +551,6 @@ async def import_testimonial(data: m.ManualImportInput, request: Request):
 
 
 # ---------- Admin / Platform settings ----------
-replace the entire function with:
-
 @api.get("/admin/stripe-status")
 async def admin_stripe_status(request: Request):
     """Diagnostic: tells the admin which Stripe lookup_keys exist and in which mode."""
