@@ -1239,7 +1239,6 @@ async def public_config():
         "promo_banner": s.get("promo_banner", ""),
     }
 
-
 @api.post("/payments/checkout")
 async def create_checkout(data: m.CheckoutInput, request: Request):
     user = await authlib.get_current_user(request)
@@ -1272,14 +1271,29 @@ async def create_checkout(data: m.CheckoutInput, request: Request):
         kwargs["discounts"] = discounts
     else:
         kwargs["allow_promotion_codes"] = True
-    try:
-        session = stripe.checkout.Session.create(**kwargs, managed_payments={"enabled": True})
-    except stripe.error.InvalidRequestError as e:
-        msg = (getattr(e, "user_message", "") or str(e)).lower()
-        if "managed payments" in msg or "ineligible" in msg:
-            session = stripe.checkout.Session.create(**kwargs, automatic_tax={"enabled": True}, billing_address_collection="required")
-        else:
-            raise HTTPException(status_code=500, detail="Could not start checkout")
+    # Try 3 progressively simpler checkout configurations. Any StripeError → surface real message.
+    session = None
+    last_error = None
+    for attempt_kwargs in (
+        {**kwargs, "managed_payments": {"enabled": True}},
+        {**kwargs, "automatic_tax": {"enabled": True}, "billing_address_collection": "required"},
+        kwargs,
+    ):
+        try:
+            session = stripe.checkout.Session.create(**attempt_kwargs)
+            break
+        except stripe.error.InvalidRequestError as e:
+            last_error = e
+            logger.warning(f"Checkout attempt rejected: {getattr(e, 'user_message', None) or e}")
+            continue
+        except stripe.error.StripeError as e:
+            real = getattr(e, "user_message", None) or str(e)
+            logger.error(f"Stripe error during checkout: {real}")
+            raise HTTPException(status_code=400, detail=f"Stripe error: {real}")
+    if session is None:
+        real = getattr(last_error, "user_message", None) or str(last_error) if last_error else "unknown"
+        logger.error(f"All checkout attempts failed. Final Stripe error: {real}")
+        raise HTTPException(status_code=400, detail=f"Stripe rejected the checkout: {real}")
     await db.payment_transactions.insert_one({
         "session_id": session.id, "user_id": user["id"], "workspace_id": ws["id"],
         "lookup_key": data.lookup_key, "plan": PLAN_BY_LOOKUP[data.lookup_key],
