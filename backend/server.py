@@ -551,13 +551,23 @@ async def import_testimonial(data: m.ManualImportInput, request: Request):
 
 
 # ---------- Admin / Platform settings ----------
+replace the entire function with:
+
 @api.get("/admin/stripe-status")
 async def admin_stripe_status(request: Request):
     """Diagnostic: tells the admin which Stripe lookup_keys exist and in which mode."""
     await require_admin(request)
     expected = ["pro_monthly", "pro_yearly", "business_monthly", "business_yearly"]
+    empty_keys = {k: {"exists": False, "price_id": None, "amount": None, "currency": None} for k in expected}
     if not stripe.api_key:
-        return {"configured": False, "detail": "STRIPE_SECRET_KEY is not set on the server."}
+        return {
+            "configured": False,
+            "mode": "unknown",
+            "lookup_keys": empty_keys,
+            "missing": expected,
+            "action": "Set STRIPE_SECRET_KEY on the server, then run `python setup_stripe.py`.",
+            "error": None,
+        }
     mode = "live" if stripe.api_key.startswith("sk_live_") else ("test" if stripe.api_key.startswith("sk_test_") else "unknown")
     try:
         found = {}
@@ -576,11 +586,12 @@ async def admin_stripe_status(request: Request):
             "lookup_keys": found,
             "missing": missing,
             "action": "All good." if not missing else "Run `python setup_stripe.py` locally with the same STRIPE_SECRET_KEY to create the missing products/prices.",
+            "error": None,
         }
     except stripe.error.AuthenticationError as e:
-        return {"configured": True, "mode": mode, "error": f"Stripe authentication failed: {e}"}
+        return {"configured": True, "mode": mode, "lookup_keys": empty_keys, "missing": expected, "action": "Fix STRIPE_SECRET_KEY.", "error": f"Stripe authentication failed: {e}"}
     except Exception as e:
-        return {"configured": True, "mode": mode, "error": str(e)}
+        return {"configured": True, "mode": mode, "lookup_keys": empty_keys, "missing": expected, "action": "Retry after fixing the Stripe error.", "error": str(e)}
         
 @api.put("/admin/settings")
 async def admin_update_settings(data: m.SettingsInput, request: Request):
