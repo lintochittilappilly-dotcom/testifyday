@@ -590,7 +590,15 @@ async def admin_stripe_status(request: Request):
         return {"configured": True, "mode": mode, "lookup_keys": empty_keys, "missing": expected, "action": "Fix STRIPE_SECRET_KEY.", "error": f"Stripe authentication failed: {e}"}
     except Exception as e:
         return {"configured": True, "mode": mode, "lookup_keys": empty_keys, "missing": expected, "action": "Retry after fixing the Stripe error.", "error": str(e)}
-        
+
+
+@api.get("/admin/settings")
+async def admin_get_settings(request: Request):
+    await require_admin(request)
+    s = await get_settings()
+    return {**s, "google_places_configured": bool(s.get("google_places_api_key"))}
+
+
 @api.put("/admin/settings")
 async def admin_update_settings(data: m.SettingsInput, request: Request):
     await require_admin(request)

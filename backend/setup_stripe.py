@@ -13,8 +13,8 @@ CATALOG = [
         "name": "Testify Pro",
         "tax_code": "txcd_10103001",  # SaaS
         "prices": [
-            {"lookup_key": "pro_monthly", "amount": 2900, "currency": "nzd", "interval": "month"},
-            {"lookup_key": "pro_yearly", "amount": 29000, "currency": "nzd", "interval": "year"},
+            {"lookup_key": "pro_monthly", "amount": 2900, "currency": "usd", "interval": "month"},
+            {"lookup_key": "pro_yearly", "amount": 29000, "currency": "usd", "interval": "year"},
         ],
     },
     {
@@ -22,8 +22,8 @@ CATALOG = [
         "name": "Testify Business",
         "tax_code": "txcd_10103001",
         "prices": [
-            {"lookup_key": "business_monthly", "amount": 7900, "currency": "nzd", "interval": "month"},
-            {"lookup_key": "business_yearly", "amount": 79000, "currency": "nzd", "interval": "year"},
+            {"lookup_key": "business_monthly", "amount": 7900, "currency": "usd", "interval": "month"},
+            {"lookup_key": "business_yearly", "amount": 79000, "currency": "usd", "interval": "year"},
         ],
     },
 ]
