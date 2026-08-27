@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Save, ShieldCheck, Mail, MapPin, KeyRound, Ticket, DollarSign } from "lucide-react";
+import { Save, ShieldCheck, Mail, MapPin, KeyRound, Ticket, DollarSign, CreditCard, CheckCircle2, XCircle, AlertCircle, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 function Group({ icon: Icon, title, desc, children }) {
@@ -98,6 +98,73 @@ function PlanEditor({ plans, overrides, setOverrides }) {
   );
 }
 
+function StripeStatus() {
+  const { data, isFetching, isError, error, refetch } = useQuery({
+    queryKey: ["stripe-status"],
+    queryFn: async () => (await api.get("/admin/stripe-status")).data,
+    staleTime: 60_000,
+  });
+  const missing = data?.missing || [];
+  const configured = data?.configured;
+  const mode = data?.mode;
+  const lookupKeys = data?.lookup_keys || {};
+  const backendError = data?.error;
+  const showSuccess = !isFetching && !isError && configured && !backendError && missing.length === 0;
+  const showMissing = !isFetching && !isError && configured && !backendError && missing.length > 0;
+  return (
+    <div data-testid="stripe-status">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          {isFetching ? (
+            <RefreshCw size={16} className="text-muted-foreground animate-spin" />
+          ) : isError ? (
+            <XCircle size={16} className="text-red-500" />
+          ) : backendError ? (
+            <XCircle size={16} className="text-red-500" />
+          ) : !configured ? (
+            <XCircle size={16} className="text-red-500" />
+          ) : missing.length === 0 ? (
+            <CheckCircle2 size={16} className="text-green-500" />
+          ) : (
+            <AlertCircle size={16} className="text-yellow-500" />
+          )}
+          <span className="text-sm">
+            {isFetching && "Checking Stripe…"}
+            {!isFetching && isError && (error?.response?.data?.detail || "Could not reach the backend.")}
+            {!isFetching && !isError && backendError && `Stripe error (${mode} mode)`}
+            {!isFetching && !isError && !backendError && !configured && "STRIPE_SECRET_KEY is not set on the server."}
+            {showSuccess && (<>All 4 plan prices found in <strong className="uppercase">{mode}</strong> mode.</>)}
+            {showMissing && (<>{missing.length} price(s) missing in <strong className="uppercase">{mode}</strong> mode.</>)}
+          </span>
+        </div>
+        <Button size="sm" variant="ghost" onClick={() => refetch()} data-testid="refresh-stripe-status" disabled={isFetching}>
+          <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /> Refresh
+        </Button>
+      </div>
+      {backendError && (
+        <div className="p-2 rounded bg-red-500/10 border border-red-500/30 text-xs text-red-500 mb-2">{backendError}</div>
+      )}
+      {configured && !backendError && (
+        <div className="grid grid-cols-2 gap-2">
+          {Object.entries(lookupKeys).map(([k, v]) => (
+            <div key={k} className="flex items-center justify-between text-xs bg-secondary/40 rounded px-2 py-1.5">
+              <span className="font-mono">{k}</span>
+              {v.exists ? (
+                <span className="flex items-center gap-1 text-green-500"><CheckCircle2 size={12} /> ${v.amount}</span>
+              ) : (
+                <span className="flex items-center gap-1 text-red-500"><XCircle size={12} /> missing</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {data?.action && (missing.length > 0 || backendError) && (
+        <p className="text-xs text-muted-foreground mt-2">{data.action}</p>
+      )}
+    </div>
+  );
+}
+
 export default function AdminIntegrations() {
   const qc = useQueryClient();
   const [s, setS] = useState(null);
@@ -133,6 +200,10 @@ export default function AdminIntegrations() {
           overrides={s.plans_override}
           setOverrides={(v) => set("plans_override", v)}
         />
+      </Group>
+
+      <Group icon={CreditCard} title="Stripe status" desc="Live check of the Stripe prices your Upgrade buttons rely on. If any are missing, run `python setup_stripe.py` on the backend once.">
+        <StripeStatus />
       </Group>
 
       <Group icon={Ticket} title="Sale / Giveaway" desc="Show a banner on the landing page and auto-apply a Stripe coupon on every checkout. Customers can still type their own promo code if this is left blank.">
