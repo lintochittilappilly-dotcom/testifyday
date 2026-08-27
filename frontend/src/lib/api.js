@@ -1,6 +1,8 @@
 import axios from "axios";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+// Hardcoded fallback in case REACT_APP_BACKEND_URL isn't baked in at build time
+// (Vercel occasionally drops .env.production; this keeps the app alive.)
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "https://www.backend.testify.day";
 export const API = `${BACKEND_URL}/api`;
 
 const api = axios.create({ baseURL: API });

@@ -92,9 +92,11 @@ export default function Landing() {
           api.get("/plans"),
           api.get("/public/config").catch(() => ({ data: {} })),
         ]);
-        setPricing(plansRes.data || []);
+        setPricing(Array.isArray(plansRes.data) ? plansRes.data : []);
         setPromo((cfgRes.data && cfgRes.data.promo_banner) || "");
-      } catch (e) { /* fall back to empty */ }
+      } catch (e) {
+        setPricing([]);
+      }
     })();
   }, []);
 
