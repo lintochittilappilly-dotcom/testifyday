@@ -47,7 +47,7 @@ export default function Settings() {
   const uploadLogo = async (e) => {
     const file = e.target.files?.[0]; if (!file) return;
     setLogoUploading(true);
-    try { const fd = new FormData(); fd.append("file", file); const { data } = await api.post("/upload", fd, { headers: { "Content-Type": "multipart/form-data" } }); setWs((w) => ({ ...w, logo_url: data.url })); toast.success("Logo uploaded — remember to save"); }
+    try { const fd = new FormData(); fd.append("file", file); const { data } = await api.post("/upload", fd, { headers: { "Content-Type": "multipart/form-data" } }); setWs((w) => ({ ...w, logo_url: data.url })); toast.success("Logo uploaded â€” remember to save"); }
     catch (err) { toast.error(formatApiError(err)); } finally { setLogoUploading(false); }
   };
 
