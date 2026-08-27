@@ -1,0 +1,35 @@
+{
+  "summary": "Frontend-only verification of the claimed white-screen fix on live https://www.testify.day. RESULT: the fix is NOT live. The deployed JS bundle is still main.a0392185.js (identical hash to before), it contains 0 occurrences of 'backend.testify.day' and still contains 'undefined/api'. Landing page is still a blank/white screen (root innerHTML length = 0) with page error 'e.map is not a function'. All API calls still go to https://www.testify.day/undefined/api/*. Root cause found in the workspace: commit 39dc0db does NOT exist locally (git cat-file: 'Not a valid object name'), `git status` shows frontend/src/lib/api.js and frontend/src/pages/Landing.jsx as MODIFIED-BUT-UNCOMMITTED, frontend/.env.production is UNTRACKED, and `git remote -v` returns EMPTY (no remote configured). So nothing was ever committed or pushed and Vercel had nothing to build. Backend spot-check passed: /api/health -> {\"status\":\"ok\"}, /api/plans -> JSON array with 3 plans (free/pro/...). Login and Register pages do render (email+password inputs + submit button present), but login submit fires POST https://www.testify.day/undefined/api/auth/login and returns 405, so authentication is fully broken in production.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Landing (live prod)", "issue": "White screen: root innerHTML length = 0, hero copy not rendered, pageerror 'e.map is not a function' still thrown. Old bundle main.a0392185.js still served.", "selector": "#root", "priority": "CRITICAL"}
+    ],
+    "integration_issues": [
+      {"flow": "Landing /api/plans + /api/public/config", "issue": "Requests still hit https://www.testify.day/undefined/api/plans and /undefined/api/public/config (expected https://www.backend.testify.day/api/...). Deployed bundle has no 'backend.testify.day' fallback string.", "affected_selectors": ["#root"]},
+      {"flow": "Login submit", "issue": "POST goes to https://www.testify.day/undefined/api/auth/login -> HTTP 405; UI shows 'Request failed with status code 405'. Auth unusable in prod.", "affected_selectors": ["button[type='submit']", "[class*='error']"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "The code fixes in frontend/src/lib/api.js and frontend/src/pages/Landing.jsx are correct but UNCOMMITTED. Commit them.",
+    "No git remote is configured in /app (`git remote -v` is empty) and commit 39dc0db does not exist. The claimed push never happened - re-add the GitHub remote and push before re-testing.",
+    "frontend/.env.production is untracked/gitignored, which is the original reason REACT_APP_BACKEND_URL was undefined at Vercel build time. Either force-add it (git add -f) or set REACT_APP_BACKEND_URL in Vercel Project -> Settings -> Environment Variables (recommended).",
+    "After deploy, verify the bundle hash changed from main.a0392185.js and that the bundle contains 'backend.testify.day'."
+  ],
+  "critical_code_review_comments": [
+    "Hardcoding the backend URL as a fallback in src/lib/api.js violates the env-var-only rule; the durable fix is setting REACT_APP_BACKEND_URL in the Vercel dashboard. Keep the Array.isArray guard regardless - defensive rendering is correct.",
+    "Other pages that .map() API responses (dashboard/testimonials/widgets lists) should get the same Array.isArray guard to avoid future full-page crashes."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (2/2 spot-check endpoints)", "frontend": "33% (login+register render; landing still white screen, API base URL still 'undefined', login submit 405)"},
+  "seed_data_creation": "None",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Verification is purely deployment-gated. Before running any UI test, first run: curl -s https://www.testify.day/ | grep -o 'main\\.[a-z0-9]*\\.js'. If it is still main.a0392185.js the new code is NOT deployed and every landing-page test will fail identically - stop and report. Once the hash changes, confirm the bundle contains 'backend.testify.day' (or that /api/plans is requested from www.backend.testify.day), then re-run landing render + login/register checks. Backend at https://www.backend.testify.day is healthy and unchanged.",
+  "rca_of_the_issue": "The white screen is caused by REACT_APP_BACKEND_URL being undefined in the Vercel production build, so axios baseURL becomes 'undefined/api', the /api/plans request resolves to the SPA HTML, and Landing.jsx's pricing.map() throws 'e.map is not a function', unmounting the whole React tree. The source fixes address this, but they were never committed or pushed: /app has no git remote, commit 39dc0db does not exist, and both files remain dirty in the working tree. Vercel therefore still serves the pre-fix bundle main.a0392185.js. Mitigation: configure REACT_APP_BACKEND_URL in Vercel env vars, commit both files (plus track .env.production or use dashboard env), push, and confirm a new bundle hash."
+}
