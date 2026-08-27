@@ -53,11 +53,24 @@ class TestLiveHttp:
         assert r.status_code in (401, 403), r.text
 
     def test_stripe_status_admin_no_key(self, api, admin_token):
+        """Iteration 6: not-configured branch must return the SAME normalized 6-key shape."""
         r = api.get(f"{API}/admin/stripe-status", headers=auth(admin_token))
         assert r.status_code == 200, r.text
         body = r.json()
+        assert sorted(body.keys()) == sorted(
+            ["configured", "mode", "lookup_keys", "missing", "action", "error"]
+        ), body
+        assert "detail" not in body, "legacy 'detail' key must be removed"
         assert body["configured"] is False
-        assert "STRIPE_SECRET_KEY" in body.get("detail", "")
+        assert body["mode"] == "unknown"
+        assert isinstance(body["lookup_keys"], dict)
+        assert sorted(body["lookup_keys"].keys()) == sorted(EXPECTED_KEYS)
+        for k, v in body["lookup_keys"].items():
+            assert v == {"exists": False, "price_id": None, "amount": None, "currency": None}, (k, v)
+        assert sorted(body["missing"]) == sorted(EXPECTED_KEYS)
+        assert isinstance(body["action"], str) and "STRIPE_SECRET_KEY" in body["action"]
+        assert "setup_stripe.py" in body["action"]
+        assert body["error"] is None
 
     def test_plans_regression(self, api):
         r = api.get(f"{API}/plans")
@@ -101,6 +114,23 @@ class _EmptyList:
     data = []
 
 
+NORMALIZED_KEYS = ["configured", "mode", "lookup_keys", "missing", "action", "error"]
+
+
+def assert_normalized_schema(body):
+    """Iteration 6: every branch of /api/admin/stripe-status returns exactly these 6 keys."""
+    assert sorted(body.keys()) == sorted(NORMALIZED_KEYS), body
+    assert isinstance(body["configured"], bool)
+    assert body["mode"] in ("live", "test", "unknown"), body["mode"]
+    assert isinstance(body["lookup_keys"], dict)
+    assert sorted(body["lookup_keys"].keys()) == sorted(EXPECTED_KEYS), body["lookup_keys"]
+    for v in body["lookup_keys"].values():
+        assert sorted(v.keys()) == sorted(["exists", "price_id", "amount", "currency"]), v
+    assert isinstance(body["missing"], list)
+    assert isinstance(body["action"], str) and body["action"]
+    assert body["error"] is None or isinstance(body["error"], str)
+
+
 class TestMonkeypatchedStripe:
     def test_checkout_no_price_message_is_actionable(self, client, inproc_user_headers, monkeypatch):
         monkeypatch.setattr(stripe, "api_key", "sk_test_fake_for_testing", raising=False)
@@ -139,18 +169,21 @@ class TestMonkeypatchedStripe:
         r = client.get("/api/admin/stripe-status", headers=inproc_admin_headers)
         assert r.status_code == 200, r.text
         b = r.json()
+        assert_normalized_schema(b)
         assert b["configured"] is True
         assert b["mode"] == "test"
         assert sorted(b["lookup_keys"].keys()) == sorted(EXPECTED_KEYS)
         assert all(v["exists"] is False for v in b["lookup_keys"].values())
         assert sorted(b["missing"]) == sorted(EXPECTED_KEYS)
         assert "setup_stripe.py" in b["action"]
+        assert b["error"] is None
 
     def test_status_live_key_mode_detection(self, client, inproc_admin_headers, monkeypatch):
         monkeypatch.setattr(stripe, "api_key", "sk_live_fake_for_testing", raising=False)
         monkeypatch.setattr(stripe.Price, "list", classmethod(lambda cls, **kw: _EmptyList()))
         r = client.get("/api/admin/stripe-status", headers=inproc_admin_headers)
         assert r.status_code == 200, r.text
+        assert_normalized_schema(r.json())
         assert r.json()["mode"] == "live"
 
     def test_status_auth_error_does_not_crash(self, client, inproc_admin_headers, monkeypatch):
@@ -161,10 +194,42 @@ class TestMonkeypatchedStripe:
         r = client.get("/api/admin/stripe-status", headers=inproc_admin_headers)
         assert r.status_code == 200, r.text
         b = r.json()
+        assert_normalized_schema(b)
         assert b["configured"] is True
         assert b["mode"] == "test"
-        assert "error" in b and b["error"], b
+        assert all(v["exists"] is False for v in b["lookup_keys"].values())
+        assert sorted(b["missing"]) == sorted(EXPECTED_KEYS)
+        assert b["error"] and b["error"].startswith("Stripe authentication failed:"), b["error"]
         assert "authentication failed" in b["error"].lower()
+
+    def test_status_three_found_one_missing(self, client, inproc_admin_headers, monkeypatch):
+        """Iteration 6: partial configuration -> missing has exactly 1 element."""
+        class FakePrice:
+            id = "price_abc"
+            unit_amount = 2900
+            currency = "usd"
+
+        class FoundList:
+            data = [FakePrice()]
+
+        def selective(cls, **kw):
+            lk = kw.get("lookup_keys", [None])[0]
+            return _EmptyList() if lk == "business_yearly" else FoundList()
+
+        monkeypatch.setattr(stripe, "api_key", "sk_test_fake_for_testing", raising=False)
+        monkeypatch.setattr(stripe.Price, "list", classmethod(selective))
+        r = client.get("/api/admin/stripe-status", headers=inproc_admin_headers)
+        assert r.status_code == 200, r.text
+        b = r.json()
+        assert_normalized_schema(b)
+        assert b["configured"] is True
+        assert b["missing"] == ["business_yearly"], b["missing"]
+        assert len(b["missing"]) == 1
+        assert "setup_stripe.py" in b["action"]
+        assert b["error"] is None
+        assert b["lookup_keys"]["pro_monthly"]["exists"] is True
+        assert b["lookup_keys"]["pro_monthly"]["amount"] == 29.0
+        assert b["lookup_keys"]["business_yearly"]["exists"] is False
 
     def test_status_prices_found_reports_amounts(self, client, inproc_admin_headers, monkeypatch):
         class FakePrice:
@@ -180,7 +245,9 @@ class TestMonkeypatchedStripe:
         r = client.get("/api/admin/stripe-status", headers=inproc_admin_headers)
         assert r.status_code == 200, r.text
         b = r.json()
+        assert_normalized_schema(b)
         assert b["missing"] == []
+        assert b["error"] is None
         assert b["lookup_keys"]["pro_monthly"] == {
             "exists": True, "price_id": "price_123", "amount": 19.0, "currency": "usd",
         }
@@ -194,7 +261,11 @@ class TestMonkeypatchedStripe:
         r = client.get("/api/admin/stripe-status", headers=inproc_admin_headers)
         assert r.status_code == 200, r.text
         b = r.json()
+        assert_normalized_schema(b)
+        assert b["configured"] is True
         assert b["mode"] == "unknown"
+        assert all(v["exists"] is False for v in b["lookup_keys"].values())
+        assert sorted(b["missing"]) == sorted(EXPECTED_KEYS)
         assert "network down" in b["error"]
 
     def test_status_nonadmin_403_inproc(self, client, inproc_user_headers, monkeypatch):

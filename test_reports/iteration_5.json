@@ -1,0 +1,43 @@
+{
+  "summary": "Iteration 5 backend-only regression run (frontend testing explicitly skipped per request). Executed the full existing suite: 62/62 passed in 36.8s (backend_test.py 21, test_admin_failclosed.py 2, test_iteration2_fixes.py 7, test_plan_gating.py 6, test_storage_region.py 11, test_stripe_diagnostics.py 16). Additionally verified the 5 requested regressions live over HTTP against the running backend: (1) unauthenticated GET /api/admin/stripe-status -> 401 {'detail':'Not authenticated'} (reproduces the exact URL-bar symptom the user reported — expected behaviour); (2) authenticated admin GET /api/admin/stripe-status -> 200 with {'configured':false,'detail':'STRIPE_SECRET_KEY is not set on the server.'} because STRIPE_SECRET_KEY is blank in backend/.env — the configured=true + 4 lookup_keys + mode=test/live/unknown branches are covered by the monkeypatched in-process TestClient tests (test_status_fake_test_key_reports_missing_all, test_status_live_key_mode_detection, test_status_prices_found_reports_amounts) which all pass; (3) non-admin -> 403 (test_stripe_status_nonadmin_403 + test_status_nonadmin_403_inproc); (4) /api/payments/checkout no-price error still contains both 'lookup_key' and 'setup_stripe.py' (test_checkout_no_price_message_is_actionable). No backend regressions. Also code-reviewed the new StripeStatus component and lint-checked AdminIntegrations.jsx (clean); confirmed its field contract (configured/mode/lookup_keys[].exists/.amount/missing/action) matches server.py exactly. No new backend test files were needed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/admin/stripe-status", "issue": "Still-open from iteration 4: inconsistent response schema across branches. configured=false branch returns only {configured, detail}; the AuthenticationError/generic-Exception branches return {configured:true, mode, error} with no lookup_keys/missing/action. Not a regression, but it directly causes the frontend misrender noted below."},
+      {"endpoint": "GET /api/admin/stripe-status", "issue": "Still-open from iteration 4: 4 sequential BLOCKING sync stripe.Price.list calls inside an async def route (no run_in_threadpool) block the event loop. Same pattern in /api/payments/checkout."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "StripeStatus (AdminIntegrations.jsx)", "issue": "No error state for the useQuery itself. If the request fails (403/500/network), data is undefined so configured is undefined and the widget renders the red X with the misleading message 'STRIPE_SECRET_KEY is not set on the server.' Should distinguish query error from configured=false using isError/error.", "selector": "[data-testid='stripe-status']", "priority": "MEDIUM"},
+      {"component": "StripeStatus (AdminIntegrations.jsx)", "issue": "Contradictory render on the Stripe error branch: backend returns {configured:true, mode, error} with no 'missing' key, so missing.length===0 and the widget shows a GREEN check with 'All 4 plan prices found in <MODE> mode.' while simultaneously showing the red error box beneath it. Gate the green/success line on lookup_keys being present and !data.error.", "selector": "[data-testid='stripe-status']", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_stripe_diagnostics.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results_iter5.xml"
+  ],
+  "action_items": [
+    "ENVIRONMENT BLOCKER (not caused by this iteration's code): supervisor 'frontend' is FATAL — /var/log/supervisor/frontend.err.log shows 'craco: not found', exit 127. /app/frontend/node_modules has no .bin and no @craco directory, i.e. frontend dependencies are not installed. Run `cd /app/frontend && yarn install` then `sudo supervisorctl restart frontend` before any frontend/UI verification of the new StripeStatus widget is possible.",
+    "Handle the useQuery error state in StripeStatus so a 403/500 is not reported as 'STRIPE_SECRET_KEY is not set'.",
+    "Do not show the green 'All 4 plan prices found' line when data.error is present / lookup_keys is absent.",
+    "Optional (carried over): normalise the /api/admin/stripe-status response shape and wrap blocking stripe SDK calls in run_in_threadpool."
+  ],
+  "critical_code_review_comments": [
+    "StripeStatus field contract verified against server.py lines 554-583: configured, mode, lookup_keys{key:{exists, price_id, amount, currency}}, missing, action — all names match, and optional chaining/defaults guard the configured=false branch correctly.",
+    "The reported user issue is not a bug: /api/admin/stripe-status is correctly auth-protected and a browser URL-bar GET cannot attach the Bearer token, so 401 is expected. Routing the call through the authenticated axios client is the right fix.",
+    "backend/server.py is still 1402 lines — exceeds the 700-line guideline; split payments/admin routers into modules.",
+    "server.py uses deprecated @app.on_event('startup'/'shutdown') (4 DeprecationWarnings in the run); migrate to a lifespan handler."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (62/62)", "frontend": "not tested (backend-only request; frontend service also FATAL due to missing node_modules)"},
+  "seed_data_creation": "Transient test_* users registered by the existing conftest fixtures; session-scoped cleanup fixture removed all test_* users/workspaces/collections/testimonials. No persistent seed data added.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "admin@testify.day / AdminTest123! from /app/memory/test_credentials.md — valid, login returns is_admin=true",
+  "context_for_next_testing_agent": "Run the suite with: cd /app/backend/tests && python -m pytest . -v (there is NO pytest.ini in /app/backend; do not create one). 62 tests, all green as of iteration 5, ~37s. STRIPE_SECRET_KEY is blank in /app/backend/.env so live HTTP only exercises the 'not configured' branch — use the in-process TestClient + monkeypatch pattern in test_stripe_diagnostics.py (patch stripe.api_key and stripe.Price.list as a classmethod) for the other branches. IMPORTANT: frontend cannot be tested until `yarn install` is run in /app/frontend (craco binary missing, supervisor frontend FATAL). Once installed, the new widget is at Dashboard -> Admin -> Integrations, data-testid='stripe-status' with refresh button data-testid='refresh-stripe-status'; expect the configured=false red-X state in this env.",
+  "rca_of_the_issue": "User symptom (401 'Not authenticated' when opening /api/admin/stripe-status in the browser address bar) is by design: the endpoint calls require_admin(request) which reads the Authorization Bearer header, and a URL-bar navigation sends no such header (auth is not cookie-based). Verified with curl: no header -> 401, admin Bearer token -> 200. The iteration-5 fix (fetching via the authenticated axios client from the StripeStatus widget) addresses it correctly; no backend change was needed and none regressed."
+}

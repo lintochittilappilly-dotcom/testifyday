@@ -1,0 +1,38 @@
+{
+  "summary": "Iteration 6 backend-only verification of the /api/admin/stripe-status schema normalization. Updated /app/backend/tests/test_stripe_diagnostics.py to the new contract and added a new test. Full suite: 63/63 PASSED in 35.6s (backend_test.py 21, test_admin_failclosed.py 2, test_iteration2_fixes.py 7, test_plan_gating.py 6, test_storage_region.py 11, test_stripe_diagnostics.py 17). Verified every branch returns EXACTLY the 6 normalized keys {configured, mode, lookup_keys, missing, action, error} via a shared assert_normalized_schema() helper: (1) live HTTP with STRIPE_SECRET_KEY blank -> configured=false, mode='unknown', lookup_keys=4 entries all {exists:false, price_id:null, amount:null, currency:null}, missing=all 4, action mentions STRIPE_SECRET_KEY + setup_stripe.py, error=null, and legacy 'detail' key confirmed REMOVED; (2) mocked sk_test_ key + empty prices -> configured=true, mode='test', all 4 exists=false, missing=all 4, action mentions setup_stripe.py, error=null; (3) sk_live_ key -> mode='live' with full schema; (4) stripe.error.AuthenticationError -> configured=true, mode='test', lookup_keys present all exists=false, missing=all 4, action set, error starts with 'Stripe authentication failed:'; (5) generic RuntimeError -> same shape, mode='unknown', error='network down'; (6) NEW test_status_three_found_one_missing: 3 lookup_keys resolve, business_yearly does not -> configured=true, missing==['business_yearly'] (exactly 1), amounts parsed (29.0), action mentions setup_stripe.py, error=null. Regressions confirmed green: non-admin 403 (live HTTP + in-process), unauthenticated 401/403, and POST /api/payments/checkout no-price detail still contains 'lookup_key', 'setup_stripe.py' and 'pro_monthly'. Frontend not tested per request; code-reviewed StripeStatus gating (isError / backendError / configured / showSuccess) and it now correctly separates the three states.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/admin/stripe-status", "issue": "Carried over (not a regression): 4 sequential BLOCKING sync stripe.Price.list calls inside an async def route block the event loop; wrap in run_in_threadpool. Same pattern in /api/payments/checkout."},
+      {"endpoint": "GET /api/admin/stripe-status", "issue": "Response is a raw dict, not a Pydantic response_model. The 6-key normalization is now only enforced by tests; a response_model=StripeStatusOut would make the contract structural and prevent the drift that caused iterations 4-6."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_stripe_diagnostics.py",
+    "/app/test_reports/pytest/pytest_results_iter6.xml"
+  ],
+  "action_items": [
+    "No blocking backend action items — schema normalization verified on all 5 branches.",
+    "Optional: add a Pydantic response_model for /api/admin/stripe-status to lock the 6-key contract in code, not just in tests.",
+    "Optional (carried over): run_in_threadpool for the blocking stripe SDK calls; split server.py (1411 lines) into routers; migrate deprecated @app.on_event startup/shutdown to a lifespan handler (4 DeprecationWarnings in the run).",
+    "Frontend UI of StripeStatus is still unverified in a browser — /app/frontend node_modules was missing craco as of iteration 5; run `cd /app/frontend && yarn install && sudo supervisorctl restart frontend` before any UI iteration."
+  ],
+  "critical_code_review_comments": [
+    "server.py:554-592 — all 5 return paths now emit the identical 6 keys and share the empty_keys template; verified by assert_normalized_schema on every branch.",
+    "AdminIntegrations.jsx:112-113 — showSuccess/showMissing are both gated on !isFetching && !isError && configured && !backendError, and the error box (line 144) plus the per-key table (line 147) are gated on backendError, so the contradictory 'All prices found' + red error box render from iteration 5 is fixed.",
+    "AdminIntegrations.jsx:133-135 — the three messages (network/HTTP error, Stripe backend error, STRIPE_SECRET_KEY unset) are now mutually exclusive; the misleading 'STRIPE_SECRET_KEY is not set' on a 403/500 is fixed."
+  ],
+  "updated_files": ["/app/backend/tests/test_stripe_diagnostics.py"],
+  "success_rate": {"backend": "100% (63/63)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "Transient test_* users registered by existing conftest fixtures; session-scoped cleanup fixture removed them. No persistent seed data.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "admin@testify.day / AdminTest123! from /app/memory/test_credentials.md — valid, login returns is_admin=true",
+  "context_for_next_testing_agent": "Run: cd /app/backend/tests && python -m pytest . -v (no pytest.ini in /app/backend; do not create one). 63 tests, all green, ~36s. test_stripe_diagnostics.py now exposes NORMALIZED_KEYS and assert_normalized_schema(body) — reuse it for any new /api/admin/stripe-status branch. STRIPE_SECRET_KEY is blank in /app/backend/.env so live HTTP only hits the not-configured branch; use the in-process TestClient + monkeypatch(stripe.api_key, stripe.Price.list as classmethod) pattern for the rest. Frontend StripeStatus widget (Dashboard -> Admin -> Integrations, data-testid='stripe-status', refresh button data-testid='refresh-stripe-status') is still browser-unverified; expect the red-X 'STRIPE_SECRET_KEY is not set' state in this env.",
+  "rca_of_the_issue": "Root cause of iterations 4-5 issues: the endpoint returned different dict shapes per branch, so the React widget read undefined 'missing'/'lookup_keys' and fell through to misleading states. Fixed by returning a single normalized 6-key payload from all branches plus explicit isError/backendError gating in the widget. No response_model exists, so the contract remains test-enforced only."
+}
