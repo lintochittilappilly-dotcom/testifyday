@@ -1,0 +1,29 @@
+{
+  "summary": "Backend-only retest of iteration 9 checkout fallback refactor. Ran the full pytest suite in /app/backend/tests: 73/73 pre-existing tests pass, including the previously-failing test_non_invalidrequest_stripe_error_on_second_attempt (no test-side edits to that test). Added 4 new escape-hatch tests (attempt-3 APIConnectionError, attempt-1 AuthenticationError, attempt-2 CardError, no payment_transactions row on attempt-2 non-InvalidRequest failure) — all pass. Final count 77/77. Live backend /api/plans returns 200.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_stripe_diagnostics.py",
+    "/app/test_reports/pytest/pytest_results_it9.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is 1426 lines — consider splitting routers (payments, admin, plans) into modules per the >700-line guideline.",
+    "Checkout still returns 500 (not 502/503) for 'no active price' and 'Stripe key invalid' cases; these are server/config states so acceptable, but a 503 would be more accurate for clients.",
+    "FastAPI @app.on_event startup/shutdown is deprecated — migrate to lifespan handlers (emits DeprecationWarning in tests)."
+  ],
+  "updated_files": ["/app/backend/tests/test_stripe_diagnostics.py"],
+  "success_rate": {"backend": "100% (77/77)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "Existing pytest fixtures create/cleanup test_*@example.com users and payment_transactions rows; no residual data.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Suite is now 77 tests across 6 test files under /app/backend/tests (run with `cd /app/backend && python -m pytest tests/ -q`). Stripe is fully mocked via _SessionCreateStub/_patch_prices in test_stripe_diagnostics.py; new class TestIteration9EscapeHatch covers non-InvalidRequestError on attempts 1/2/3. Frontend never exercised in iterations 8-9.",
+  "rca_of_the_issue": "Iteration 8 gap: the try/except was structured so non-InvalidRequestError StripeErrors on retry attempts escaped as 500. The loop-with-inner-try refactor at server.py:1275-1297 now catches stripe.error.StripeError on every attempt and raises HTTP 400 'Stripe error: <real>' immediately, while InvalidRequestError continues to the next variant and exhaustion yields 400 'Stripe rejected the checkout: <real>'. Verified by test: only 2 Session.create calls occur when attempt 2 raises RateLimitError (no further retries) and no payment_transactions row is inserted."
+}

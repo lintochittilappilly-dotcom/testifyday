@@ -272,3 +272,261 @@ class TestMonkeypatchedStripe:
         monkeypatch.setattr(stripe, "api_key", "sk_test_fake_for_testing", raising=False)
         r = client.get("/api/admin/stripe-status", headers=inproc_user_headers)
         assert r.status_code == 403, r.text
+
+
+# ---------- Iteration 8: 3-attempt checkout fallback chain + StripeError surfacing ----------
+class _FakePrice:
+    id = "price_test_iter8"
+    unit_amount = 2900
+    currency = "usd"
+
+
+class _FoundPrices:
+    data = [_FakePrice()]
+
+
+class _FakeSession:
+    def __init__(self, sid="cs_test_iter8", url="https://checkout.stripe.com/c/pay/cs_test_iter8"):
+        self.id = sid
+        self.url = url
+
+
+def _patch_prices(monkeypatch):
+    monkeypatch.setattr(stripe, "api_key", "sk_test_fake_for_testing", raising=False)
+    monkeypatch.setattr(stripe.Price, "list", classmethod(lambda cls, **kw: _FoundPrices()))
+
+
+class _SessionCreateStub:
+    """Callable stub for stripe.checkout.Session.create.
+
+    behaviours: list of either exception instances (raised) or _FakeSession (returned),
+    consumed one per call.
+    """
+
+    def __init__(self, behaviours):
+        self.behaviours = list(behaviours)
+        self.calls = []
+
+    def __call__(self, **kwargs):
+        self.calls.append(kwargs)
+        b = self.behaviours.pop(0) if self.behaviours else self.behaviours
+        if isinstance(b, Exception):
+            raise b
+        return b
+
+
+@pytest.fixture
+def txn_cleanup():
+    ids = []
+    yield ids
+    try:
+        from pymongo import MongoClient
+        from conftest import MONGO_URL, DB_NAME
+        if MONGO_URL and DB_NAME and ids:
+            c = MongoClient(MONGO_URL)
+            c[DB_NAME].payment_transactions.delete_many({"session_id": {"$in": ids}})
+            c.close()
+    except Exception as exc:  # pragma: no cover
+        print(f"cleanup skipped: {exc}")
+
+
+class TestCheckoutFallbackChain:
+    def _post(self, client, headers):
+        return client.post("/api/payments/checkout",
+                           json={"lookup_key": "pro_monthly", "origin_url": "http://localhost:3000"},
+                           headers=headers)
+
+    def test_first_attempt_success_regression(self, client, inproc_user_headers, monkeypatch, txn_cleanup, mongo):
+        _patch_prices(monkeypatch)
+        stub = _SessionCreateStub([_FakeSession("cs_test_iter8_ok")])
+        monkeypatch.setattr(stripe.checkout.Session, "create", stub)
+        r = self._post(client, inproc_user_headers)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["session_id"] == "cs_test_iter8_ok"
+        assert body["checkout_url"].startswith("https://checkout.stripe.com/")
+        txn_cleanup.append(body["session_id"])
+        assert len(stub.calls) == 1
+        assert stub.calls[0].get("managed_payments") == {"enabled": True}
+        rec = mongo.payment_transactions.find_one({"session_id": body["session_id"]})
+        assert rec is not None and rec["status"] == "initiated"
+        assert rec["plan"] == "pro" and rec["amount"] == 2900 and rec["currency"] == "usd"
+
+    def test_second_attempt_automatic_tax_succeeds(self, client, inproc_user_headers, monkeypatch, txn_cleanup, mongo):
+        _patch_prices(monkeypatch)
+        stub = _SessionCreateStub([
+            stripe.error.InvalidRequestError("managed payments not enabled", "managed_payments"),
+            _FakeSession("cs_test_iter8_second"),
+        ])
+        monkeypatch.setattr(stripe.checkout.Session, "create", stub)
+        r = self._post(client, inproc_user_headers)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["session_id"] == "cs_test_iter8_second"
+        assert "Could not start checkout" not in r.text
+        txn_cleanup.append(body["session_id"])
+        assert len(stub.calls) == 2
+        assert stub.calls[1].get("automatic_tax") == {"enabled": True}
+        assert stub.calls[1].get("billing_address_collection") == "required"
+        assert mongo.payment_transactions.find_one({"session_id": body["session_id"]}) is not None
+
+    def test_third_attempt_minimal_succeeds(self, client, inproc_user_headers, monkeypatch, txn_cleanup, mongo):
+        _patch_prices(monkeypatch)
+        stub = _SessionCreateStub([
+            stripe.error.InvalidRequestError("managed payments unsupported", "managed_payments"),
+            stripe.error.InvalidRequestError("automatic_tax not permitted", "automatic_tax"),
+            _FakeSession("cs_test_iter8_third"),
+        ])
+        monkeypatch.setattr(stripe.checkout.Session, "create", stub)
+        r = self._post(client, inproc_user_headers)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["session_id"] == "cs_test_iter8_third"
+        txn_cleanup.append(body["session_id"])
+        assert len(stub.calls) == 3
+        assert "managed_payments" not in stub.calls[2]
+        assert "automatic_tax" not in stub.calls[2]
+        assert mongo.payment_transactions.find_one({"session_id": body["session_id"]}) is not None
+
+    def test_all_three_attempts_fail_returns_400_with_real_message(self, client, inproc_user_headers, monkeypatch):
+        _patch_prices(monkeypatch)
+        stub = _SessionCreateStub([
+            stripe.error.InvalidRequestError("managed payments unsupported", "managed_payments"),
+            stripe.error.InvalidRequestError("automatic_tax not permitted", "automatic_tax"),
+            stripe.error.InvalidRequestError("No such coupon: 'LAUNCH50'", "discounts"),
+        ])
+        monkeypatch.setattr(stripe.checkout.Session, "create", stub)
+        r = self._post(client, inproc_user_headers)
+        assert r.status_code == 400, r.text
+        detail = r.json()["detail"]
+        assert detail.startswith("Stripe rejected the checkout:"), detail
+        assert "No such coupon: 'LAUNCH50'" in detail, detail
+        assert "Could not start checkout" not in r.text
+        assert len(stub.calls) == 3
+
+    def test_coupon_not_found_message_surfaced_with_admin_coupon(self, client, inproc_user_headers,
+                                                                monkeypatch, server_mod):
+        """Admin-configured coupon is sent as discounts and the real Stripe error is surfaced."""
+        _patch_prices(monkeypatch)
+
+        async def fake_get_setting(key, default=None):
+            return "BAD_COUPON_ID" if key == "checkout_coupon_id" else default
+
+        monkeypatch.setattr(server_mod, "get_setting", fake_get_setting)
+        err = stripe.error.InvalidRequestError("No such coupon: 'BAD_COUPON_ID'", "discounts")
+        stub = _SessionCreateStub([err, err, err])
+        monkeypatch.setattr(stripe.checkout.Session, "create", stub)
+        r = self._post(client, inproc_user_headers)
+        assert r.status_code == 400, r.text
+        detail = r.json()["detail"]
+        assert "No such coupon: 'BAD_COUPON_ID'" in detail, detail
+        assert stub.calls[0].get("discounts") == [{"coupon": "BAD_COUPON_ID"}]
+        assert "allow_promotion_codes" not in stub.calls[0]
+
+    def test_rate_limit_error_returns_400_with_real_message(self, client, inproc_user_headers, monkeypatch):
+        _patch_prices(monkeypatch)
+        stub = _SessionCreateStub([stripe.error.RateLimitError("Too many requests hit the API too quickly")])
+        monkeypatch.setattr(stripe.checkout.Session, "create", stub)
+        r = self._post(client, inproc_user_headers)
+        assert r.status_code == 400, r.text
+        detail = r.json()["detail"]
+        assert detail.startswith("Stripe error:"), detail
+        assert "Too many requests" in detail, detail
+        assert "Could not start checkout" not in r.text
+
+    def test_api_connection_error_returns_400_with_real_message(self, client, inproc_user_headers, monkeypatch):
+        _patch_prices(monkeypatch)
+        stub = _SessionCreateStub([stripe.error.APIConnectionError("Unexpected error communicating with Stripe")])
+        monkeypatch.setattr(stripe.checkout.Session, "create", stub)
+        r = self._post(client, inproc_user_headers)
+        assert r.status_code == 400, r.text
+        detail = r.json()["detail"]
+        assert detail.startswith("Stripe error:"), detail
+        assert "communicating with Stripe" in detail, detail
+
+    def test_no_transaction_row_on_failure(self, client, inproc_user_headers, monkeypatch, mongo):
+        _patch_prices(monkeypatch)
+        err = stripe.error.InvalidRequestError("fatal config problem", "mode")
+        monkeypatch.setattr(stripe.checkout.Session, "create", _SessionCreateStub([err, err, err]))
+        before = mongo.payment_transactions.count_documents({})
+        r = self._post(client, inproc_user_headers)
+        assert r.status_code == 400
+        assert mongo.payment_transactions.count_documents({}) == before
+
+    def test_non_invalidrequest_stripe_error_on_second_attempt(self, client, inproc_user_headers, monkeypatch):
+        """Gap check: a non-InvalidRequestError StripeError raised by attempt 2/3 must not 500."""
+        _patch_prices(monkeypatch)
+        stub = _SessionCreateStub([
+            stripe.error.InvalidRequestError("managed payments unsupported", "managed_payments"),
+            stripe.error.RateLimitError("Too many requests on retry"),
+        ])
+        monkeypatch.setattr(stripe.checkout.Session, "create", stub)
+        r = self._post(client, inproc_user_headers)
+        assert r.status_code == 400, f"expected surfaced 400, got {r.status_code}: {r.text[:300]}"
+        assert "Too many requests on retry" in r.json()["detail"]
+
+
+class TestIteration9EscapeHatch:
+    """Iteration 9: non-InvalidRequest StripeError on ANY attempt must produce a clean 400."""
+
+    def _post(self, client, headers):
+        return client.post("/api/payments/checkout",
+                           json={"lookup_key": "pro_monthly", "origin_url": "http://localhost:3000"},
+                           headers=headers)
+
+    def test_third_attempt_api_connection_error_returns_400(self, client, inproc_user_headers, monkeypatch):
+        _patch_prices(monkeypatch)
+        stub = _SessionCreateStub([
+            stripe.error.InvalidRequestError("managed payments unsupported", "managed_payments"),
+            stripe.error.InvalidRequestError("automatic_tax not permitted", "automatic_tax"),
+            stripe.error.APIConnectionError("Unexpected error communicating with Stripe on third try"),
+        ])
+        monkeypatch.setattr(stripe.checkout.Session, "create", stub)
+        r = self._post(client, inproc_user_headers)
+        assert r.status_code == 400, f"expected 400, got {r.status_code}: {r.text[:300]}"
+        detail = r.json()["detail"]
+        assert detail.startswith("Stripe error:"), detail
+        assert "third try" in detail, detail
+        assert len(stub.calls) == 3
+
+    def test_first_attempt_authentication_error_returns_400(self, client, inproc_user_headers, monkeypatch):
+        _patch_prices(monkeypatch)
+        stub = _SessionCreateStub([stripe.error.AuthenticationError("Invalid API Key provided")])
+        monkeypatch.setattr(stripe.checkout.Session, "create", stub)
+        r = self._post(client, inproc_user_headers)
+        assert r.status_code == 400, r.text
+        detail = r.json()["detail"]
+        assert detail.startswith("Stripe error:"), detail
+        assert "Invalid API Key" in detail, detail
+        assert len(stub.calls) == 1, "must not retry after a non-InvalidRequest error"
+
+    def test_second_attempt_card_error_returns_400(self, client, inproc_user_headers, monkeypatch):
+        _patch_prices(monkeypatch)
+        stub = _SessionCreateStub([
+            stripe.error.InvalidRequestError("managed payments unsupported", "managed_payments"),
+            stripe.error.CardError("Your card was declined", "number", "card_declined"),
+        ])
+        monkeypatch.setattr(stripe.checkout.Session, "create", stub)
+        r = self._post(client, inproc_user_headers)
+        assert r.status_code == 400, r.text
+        assert "declined" in r.json()["detail"], r.text
+        assert len(stub.calls) == 2
+
+    def test_no_txn_row_when_non_invalidrequest_error_on_attempt_two(self, client, inproc_user_headers,
+                                                                    monkeypatch, mongo):
+        _patch_prices(monkeypatch)
+        stub = _SessionCreateStub([
+            stripe.error.InvalidRequestError("managed payments unsupported", "managed_payments"),
+            stripe.error.RateLimitError("slow down"),
+        ])
+        monkeypatch.setattr(stripe.checkout.Session, "create", stub)
+        before = mongo.payment_transactions.count_documents({})
+        r = self._post(client, inproc_user_headers)
+        assert r.status_code == 400
+        assert mongo.payment_transactions.count_documents({}) == before
+
+
+class TestNoLegacyMessage:
+    def test_server_py_has_no_could_not_start_checkout(self):
+        src = Path("/app/backend/server.py").read_text()
+        assert "Could not start checkout" not in src, "legacy generic message still present in server.py"
