@@ -551,6 +551,38 @@ async def import_testimonial(data: m.ManualImportInput, request: Request):
 
 
 # ---------- Admin / Platform settings ----------
+@api.get("/admin/stripe-status")
+async def admin_stripe_status(request: Request):
+    """Diagnostic: tells the admin which Stripe lookup_keys exist and in which mode."""
+    await require_admin(request)
+    expected = ["pro_monthly", "pro_yearly", "business_monthly", "business_yearly"]
+    if not stripe.api_key:
+        return {"configured": False, "detail": "STRIPE_SECRET_KEY is not set on the server."}
+    mode = "live" if stripe.api_key.startswith("sk_live_") else ("test" if stripe.api_key.startswith("sk_test_") else "unknown")
+    try:
+        found = {}
+        for lk in expected:
+            prices = stripe.Price.list(lookup_keys=[lk], active=True, limit=1).data
+            found[lk] = {
+                "exists": bool(prices),
+                "price_id": prices[0].id if prices else None,
+                "amount": (prices[0].unit_amount / 100) if prices else None,
+                "currency": prices[0].currency if prices else None,
+            }
+        missing = [k for k, v in found.items() if not v["exists"]]
+        return {
+            "configured": True,
+            "mode": mode,
+            "lookup_keys": found,
+            "missing": missing,
+            "action": "All good." if not missing else "Run `python setup_stripe.py` locally with the same STRIPE_SECRET_KEY to create the missing products/prices.",
+        }
+    except stripe.error.AuthenticationError as e:
+        return {"configured": True, "mode": mode, "error": f"Stripe authentication failed: {e}"}
+    except Exception as e:
+        return {"configured": True, "mode": mode, "error": str(e)}
+
+
 @api.get("/admin/settings")
 async def admin_get_settings(request: Request):
     await require_admin(request)
@@ -1205,9 +1237,17 @@ async def create_checkout(data: m.CheckoutInput, request: Request):
     ws = await authlib.get_user_workspace(user)
     if data.lookup_key not in PLAN_BY_LOOKUP:
         raise HTTPException(status_code=400, detail="Invalid plan")
-    prices = stripe.Price.list(lookup_keys=[data.lookup_key], active=True, limit=1).data
+    if not stripe.api_key:
+        raise HTTPException(status_code=500, detail="Stripe is not configured on the server. Set STRIPE_SECRET_KEY.")
+    try:
+        prices = stripe.Price.list(lookup_keys=[data.lookup_key], active=True, limit=1).data
+    except stripe.error.AuthenticationError:
+        raise HTTPException(status_code=500, detail="Stripe key is invalid. Check STRIPE_SECRET_KEY on the server.")
     if not prices:
-        raise HTTPException(status_code=500, detail="Plan price not configured")
+        raise HTTPException(
+            status_code=500,
+            detail=f"No active Stripe price with lookup_key '{data.lookup_key}'. Ask the site admin to run `python setup_stripe.py` on the backend to create the Pro and Business products in the correct Stripe mode (live vs test).",
+        )
     price = prices[0]
     origin = data.origin_url.rstrip("/")
     coupon_id = (await get_setting("checkout_coupon_id") or "").strip()

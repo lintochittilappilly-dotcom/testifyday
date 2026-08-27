@@ -1,0 +1,32 @@
+{
+  "summary": "Backend-only iteration 4 testing of the improved /api/payments/checkout error messaging and the new /api/admin/stripe-status diagnostic endpoint. Added /app/backend/tests/test_stripe_diagnostics.py with 16 tests: 7 live-HTTP tests against the running backend (STRIPE_SECRET_KEY blank) and 9 in-process FastAPI TestClient tests where stripe.api_key and stripe.Price.list are monkeypatched (empty list, AuthenticationError, generic Exception, found-price, live/test/unknown mode detection). No real Stripe API calls were made. Full suite: 62/62 passed (46 previous regression tests + 16 new).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/admin/stripe-status", "issue": "Response schema is inconsistent across branches: the not-configured branch returns only {configured:false, detail:...} and the error branches return {configured, mode, error} — 'mode', 'lookup_keys', 'missing', 'action' are absent. Frontend consumers must null-guard; consider always returning the full shape."},
+      {"endpoint": "GET /api/admin/stripe-status", "issue": "Makes 4 sequential BLOCKING sync stripe.Price.list calls inside an async def route (no run_in_threadpool), so it blocks the event loop for up to ~4 round trips. Same pattern in /api/payments/checkout (stripe.Price.list / Session.create)."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_stripe_diagnostics.py",
+    "/app/test_reports/pytest/pytest_results_iter4.xml"
+  ],
+  "action_items": [
+    "Optional: normalise /api/admin/stripe-status response schema so configured=false / error branches also include mode, lookup_keys, missing, action keys",
+    "Optional: wrap blocking stripe SDK calls in run_in_threadpool (or use stripe async client) in stripe-status and checkout"
+  ],
+  "critical_code_review_comments": [
+    "Verified the no-price checkout error contains both 'lookup_key' and 'setup_stripe.py' plus the offending key name — matches the exact wording the frontend surfaces.",
+    "stripe.error.AuthenticationError still resolves correctly on installed stripe 14.4.1 (alias of stripe.AuthenticationError), so the except clauses are valid.",
+    "backend/server.py is 1402 lines — exceeds the 700-line guideline; consider splitting payments/admin routers into modules."
+  ],
+  "updated_files": ["/app/backend/tests/test_stripe_diagnostics.py"],
+  "success_rate": {"backend": "100% (62/62)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "Transient test_* users registered via existing conftest fixtures plus one in-process test_inproc_* user; conftest session cleanup removes all test_* users/workspaces.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "admin@testify.day / AdminTest123! (from /app/memory/test_credentials.md) — valid, admin login returns is_admin=true",
+  "context_for_next_testing_agent": "STRIPE_SECRET_KEY is blank in /app/backend/.env, so live-HTTP Stripe paths only exercise the 'not configured' branch. For branch coverage use the in-process TestClient pattern in test_stripe_diagnostics.py (monkeypatch stripe.api_key and stripe.Price.list as a classmethod). Full suite run: cd /app/backend/tests && python -m pytest . -v (no pytest.ini exists in /app/backend). All 62 tests currently green.",
+  "rca_of_the_issue": "The original 'Plan price not configured' error came from stripe.Price.list returning no active price for the lookup_key (setup_stripe.py never run, or run in the other Stripe mode). The fix now returns an actionable 500 naming the lookup_key and setup_stripe.py, and the new admin diagnostic reports mode + per-lookup_key existence. Both verified with mocked Stripe responses."
+}
