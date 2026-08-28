@@ -53,6 +53,11 @@ export default function Register() {
         <Button type="submit" disabled={loading} className="w-full h-11" data-testid="register-submit">
           {loading ? <Loader2 className="animate-spin" size={18} /> : "Create free account"}
         </Button>
+        <p className="text-xs text-center text-muted-foreground leading-relaxed">
+          By creating an account you agree to our{" "}
+          <Link to="/terms" className="text-foreground hover:underline" data-testid="register-terms-link">Terms of Service</Link>{" "}and{" "}
+          <Link to="/privacy" className="text-foreground hover:underline" data-testid="register-privacy-link">Privacy Policy</Link>.
+        </p>
         <p className="text-sm text-center text-muted-foreground">
           Already have an account? <Link to="/login" className="text-primary hover:underline font-medium" data-testid="to-login">Log in</Link>
         </p>

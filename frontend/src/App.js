@@ -26,6 +26,8 @@ import WidgetEmbed from "@/pages/WidgetEmbed";
 import WallOfLove from "@/pages/WallOfLove";
 import PaymentSuccess from "@/pages/PaymentSuccess";
 import PaymentCancel from "@/pages/PaymentCancel";
+import Terms from "@/pages/Terms";
+import Privacy from "@/pages/Privacy";
 
 function LoadingScreen() {
   return (
@@ -74,6 +76,8 @@ function AppRouter() {
       <Route path="/embed/:id" element={<WidgetEmbed />} />
       <Route path="/payment/success" element={<ProtectedRoute><PaymentSuccess /></ProtectedRoute>} />
       <Route path="/payment/cancel" element={<PaymentCancel />} />
+      <Route path="/terms" element={<Terms />} />
+      <Route path="/privacy" element={<Privacy />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

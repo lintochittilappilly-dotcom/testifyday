@@ -256,7 +256,12 @@ export default function Landing() {
       <footer className="border-t border-white/10">
         <div className="max-w-7xl mx-auto px-6 py-10 flex flex-col sm:flex-row items-center justify-between gap-4">
           <Logo />
-          <p className="text-white/40 text-sm">© {new Date().getFullYear()} Testify. Turn happy customers into your best marketing.</p>
+          <div className="flex gap-6 text-white/40 text-sm">
+            <Link to="/terms" className="hover:text-white" data-testid="footer-terms-link">Terms</Link>
+            <Link to="/privacy" className="hover:text-white" data-testid="footer-privacy-link">Privacy</Link>
+            <a href="mailto:hello@testify.day" className="hover:text-white">Contact</a>
+          </div>
+          <p className="text-white/40 text-sm">© {new Date().getFullYear()} Testify.</p>
         </div>
       </footer>
     </div>
