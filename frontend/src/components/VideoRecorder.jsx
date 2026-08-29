@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import api, { formatApiError } from "@/lib/api";
 import { toast } from "sonner";
 
-export default function VideoRecorder({ onUploaded, accent = "#ff5722" }) {
+export default function VideoRecorder({ onUploaded, accent = "#ff5722", maxDurationSec = 120, minDurationSec = 10, maxSizeMb = 200 }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const recorderRef = useRef(null);
@@ -66,7 +66,7 @@ export default function VideoRecorder({ onUploaded, accent = "#ff5722" }) {
     setSeconds(0);
     setState("recording");
     timerRef.current = setInterval(() => setSeconds((s) => {
-      if (s >= 120) { stopRecording(); return s; }
+      if (s >= maxDurationSec) { stopRecording(); return s; }
       return s + 1;
     }), 1000);
   };
@@ -75,6 +75,10 @@ export default function VideoRecorder({ onUploaded, accent = "#ff5722" }) {
     if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop();
     if (timerRef.current) clearInterval(timerRef.current);
     stopStream();
+    // Enforce min duration on manual stop
+    if (seconds < minDurationSec) {
+      setError(`Please record at least ${minDurationSec} seconds. Try again.`);
+    }
   };
 
   const retake = () => {
@@ -108,6 +112,7 @@ export default function VideoRecorder({ onUploaded, accent = "#ff5722" }) {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith("video/")) { setError("Please select a video file."); return; }
+    if (file.size > maxSizeMb * 1024 * 1024) { setError(`Video is too large. Max ${maxSizeMb} MB.`); return; }
     if (file.size > 80 * 1024 * 1024) { setError("Video too large (max 80MB)."); return; }
     setError("");
     uploadBlob(file, file.name);
@@ -133,10 +138,19 @@ export default function VideoRecorder({ onUploaded, accent = "#ff5722" }) {
           </div>
         )}
         {state === "recording" && (
-          <div className="absolute top-3 left-3 flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/60 backdrop-blur">
-            <CircleDot size={14} className="text-red-500 animate-pulse" />
-            <span className="text-white text-sm font-mono">{fmt(seconds)}</span>
-          </div>
+          <>
+            <div className="absolute top-3 left-3 flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/60 backdrop-blur">
+              <CircleDot size={14} className="text-red-500 animate-pulse" />
+              <span className="text-white text-sm font-mono" data-testid="record-timer">
+                {fmt(seconds)} / {fmt(maxDurationSec)}
+              </span>
+            </div>
+            {maxDurationSec - seconds <= 10 && maxDurationSec - seconds > 0 && (
+              <div className="absolute top-3 right-3 px-3 py-1.5 rounded-full bg-yellow-500/90 text-black text-xs font-semibold animate-pulse" data-testid="record-warning">
+                Auto-stopping in {maxDurationSec - seconds}s
+              </div>
+            )}
+          </>
         )}
         {state === "uploading" && (
           <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center gap-3">
