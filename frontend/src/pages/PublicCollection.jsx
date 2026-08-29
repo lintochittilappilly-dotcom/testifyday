@@ -163,7 +163,25 @@ export default function PublicCollection() {
             <form onSubmit={submit} className="space-y-4" data-testid="submission-form">
               <button type="button" onClick={() => setMode(null)} className="flex items-center gap-1.5 text-white/50 hover:text-white text-sm mb-2"><ArrowLeft size={15} /> Back</button>
 
-              {mode === "video" && <VideoRecorder accent={accent} onUploaded={setVideoUrl} />}
+              {mode === "video" && (
+                <>
+                  {(col.video_max_duration_sec || col.video_max_size_mb) && (
+                    <div className="text-xs text-white/50 mb-2" data-testid="video-limits-hint">
+                      {col.video_max_duration_sec ? `Up to ${col.video_max_duration_sec >= 60 ? `${Math.floor(col.video_max_duration_sec/60)} min` : `${col.video_max_duration_sec} sec`}` : ""}
+                      {col.video_max_duration_sec && col.video_max_size_mb ? " · " : ""}
+                      {col.video_max_size_mb ? `${col.video_max_size_mb} MB max` : ""}
+                      {col.video_min_duration_sec ? ` · min ${col.video_min_duration_sec}s` : ""}
+                    </div>
+                  )}
+                  <VideoRecorder
+                    accent={accent}
+                    onUploaded={setVideoUrl}
+                    maxDurationSec={col.video_max_duration_sec || 120}
+                    minDurationSec={col.video_min_duration_sec || 10}
+                    maxSizeMb={col.video_max_size_mb || 200}
+                  />
+                </>
+              )}
 
               {mode === "image" && (
                 <div>
