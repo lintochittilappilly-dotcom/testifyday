@@ -29,7 +29,7 @@ from email_service import (
     team_invite_email,
 )
 from captcha import verify_recaptcha
-from settings_store import get_settings, get_setting, update_settings, get_plans
+from settings_store import get_settings, get_setting, update_settings, get_plans, get_video_limits
 import stripe
 import requests
 
@@ -852,9 +852,21 @@ async def upload(request: Request, file: UploadFile = File(...)):
     ct = file.content_type or "application/octet-stream"
     if ct not in ALLOWED_MIME:
         raise HTTPException(status_code=400, detail="Unsupported file type")
+    is_video = ct.startswith("video/")
+    is_image = ct.startswith("image/")
     data = await file.read()
-    if len(data) > MAX_SIZE:
-        raise HTTPException(status_code=400, detail="File too large (max 80MB)")
+    size = len(data)
+    if is_video:
+        limits = await get_video_limits()
+        biggest = max(int(limits.get("pro", {}).get("max_size_mb", 50)), int(limits.get("business", {}).get("max_size_mb", 200)))
+        if size > biggest * 1024 * 1024:
+            raise HTTPException(status_code=413, detail=f"Video is too large. Max {biggest}MB.")
+    elif is_image:
+        if size > 5 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Image is too large. Max 5MB.")
+    else:
+        if size > MAX_SIZE:
+            raise HTTPException(status_code=413, detail=f"File too large. Max {MAX_SIZE // (1024*1024)}MB.")
     ext = (file.filename or "bin").split(".")[-1].lower()
     path = f"{APP_NAME}/uploads/{uuid.uuid4().hex}.{ext}"
     try:
@@ -884,8 +896,11 @@ async def media(path: str):
 
 
 # ---------- Public collection ----------
-def _public_collection(col: dict, ws: dict) -> dict:
+async def _public_collection(col: dict, ws: dict) -> dict:
     plan = ws.get("plan", "free")
+    limits = await get_video_limits()
+    plan_key = "business" if plan == "business" else "pro"
+    video_cfg = limits.get(plan_key, {}) if _is_unlimited(plan) else {}
     return {
         "id": col["id"], "name": col["name"], "slug": col["slug"],
         "headline": col.get("headline"), "description": col.get("description"),
@@ -899,6 +914,9 @@ def _public_collection(col: dict, ws: dict) -> dict:
         "custom_questions": col.get("custom_questions", []),
         "thank_you_message": col.get("thank_you_message"), "redirect_url": col.get("redirect_url"),
         "business_name": ws.get("name"),
+        "video_max_duration_sec": video_cfg.get("max_duration_sec"),
+        "video_max_size_mb": video_cfg.get("max_size_mb"),
+        "video_min_duration_sec": limits.get("min_duration_sec", 10) if _is_unlimited(plan) else None,
     }
 
 
@@ -913,7 +931,7 @@ async def public_collection(slug: str):
         "id": m.gen_id("ev_"), "workspace_id": ws["id"], "collection_id": col["id"],
         "widget_id": None, "event_type": "collection_view", "metadata": {}, "created_at": m.now_iso(),
     })
-    return _public_collection(col, ws)
+    return await _public_collection(col, ws)
 
 
 @api.post("/public/collection/{slug}/submit")
@@ -943,6 +961,15 @@ async def submit_testimonial(slug: str, data: m.TestimonialSubmit, request: Requ
             raise HTTPException(status_code=402, detail="Video testimonials are a paid feature. This business is on the Free plan.")
         if await db.testimonials.count_documents({"workspace_id": ws["id"]}) >= 5:
             raise HTTPException(status_code=402, detail="This business has reached its Free plan limit of 5 testimonials. Please try again later.")
+    elif data.video_url:
+        # Paid plan video cap (0 = unlimited)
+        limits = await get_video_limits()
+        plan_key = "business" if plan == "business" else "pro"
+        max_count = int((limits.get(plan_key) or {}).get("max_count") or 0)
+        if max_count > 0:
+            existing = await db.testimonials.count_documents({"workspace_id": ws["id"], "video_url": {"$ne": None}})
+            if existing >= max_count:
+                raise HTTPException(status_code=402, detail=f"This business has reached its plan limit of {max_count} video testimonials.")
     doc = {
         "id": m.gen_id("tst_"),
         "workspace_id": ws["id"],
@@ -1238,6 +1265,7 @@ async def public_config():
         "recaptcha_site_key": s.get("recaptcha_site_key", ""),
         "promo_banner": s.get("promo_banner", ""),
     }
+
 
 @api.post("/payments/checkout")
 async def create_checkout(data: m.CheckoutInput, request: Request):

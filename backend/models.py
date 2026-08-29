@@ -188,6 +188,7 @@ class SettingsInput(BaseModel):
     checkout_coupon_id: Optional[str] = None
     promo_banner: Optional[str] = None
     plans_override: Optional[List[Dict[str, Any]]] = None
+    video_limits: Optional[Dict[str, Any]] = None
 
 
 class CheckoutInput(BaseModel):
