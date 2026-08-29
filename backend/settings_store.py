@@ -55,7 +55,14 @@ SETTING_KEYS = [
     "checkout_coupon_id",
     "promo_banner",
     "plans_override",
+    "video_limits",
 ]
+
+DEFAULT_VIDEO_LIMITS = {
+    "min_duration_sec": 10,
+    "pro": {"max_duration_sec": 60, "max_size_mb": 50, "max_count": 30},
+    "business": {"max_duration_sec": 180, "max_size_mb": 200, "max_count": 0},
+}
 
 
 def _env_defaults():
@@ -68,7 +75,31 @@ def _env_defaults():
         "checkout_coupon_id": "",
         "promo_banner": "",
         "plans_override": [],
+        "video_limits": {},
     }
+
+
+async def get_video_limits() -> dict:
+    """Merge admin overrides on top of DEFAULT_VIDEO_LIMITS."""
+    import copy
+    limits = copy.deepcopy(DEFAULT_VIDEO_LIMITS)
+    override = await get_setting("video_limits") or {}
+    if isinstance(override, dict):
+        if "min_duration_sec" in override:
+            try:
+                limits["min_duration_sec"] = int(override["min_duration_sec"])
+            except Exception:
+                pass
+        for tier in ("pro", "business"):
+            t = override.get(tier) or {}
+            if isinstance(t, dict):
+                for k in ("max_duration_sec", "max_size_mb", "max_count"):
+                    if k in t:
+                        try:
+                            limits[tier][k] = int(t[k])
+                        except Exception:
+                            pass
+    return limits
 
 
 async def get_settings() -> dict:
