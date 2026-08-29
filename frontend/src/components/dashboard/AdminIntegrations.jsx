@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Save, ShieldCheck, Mail, MapPin, KeyRound, Ticket, DollarSign, CreditCard, CheckCircle2, XCircle, AlertCircle, RefreshCw } from "lucide-react";
+import { Save, ShieldCheck, Mail, MapPin, KeyRound, Ticket, DollarSign, CreditCard, CheckCircle2, XCircle, AlertCircle, RefreshCw, Video } from "lucide-react";
 import { toast } from "sonner";
 
 function Group({ icon: Icon, title, desc, children }) {
@@ -170,13 +170,14 @@ export default function AdminIntegrations() {
   const [s, setS] = useState(null);
   const { data, isLoading } = useQuery({ queryKey: ["admin-settings"], queryFn: async () => (await api.get("/admin/settings")).data });
   const { data: plans = [] } = useQuery({ queryKey: ["plans"], queryFn: async () => (await api.get("/plans")).data });
-  useEffect(() => { if (data) setS({ ...data, plans_override: data.plans_override || [] }); }, [data]);
+  useEffect(() => { if (data) setS({ ...data, plans_override: data.plans_override || [], video_limits: data.video_limits || {} }); }, [data]);
 
   const save = useMutation({
     mutationFn: () => api.put("/admin/settings", {
       recaptcha_site_key: s.recaptcha_site_key, recaptcha_secret_key: s.recaptcha_secret_key,
       resend_api_key: s.resend_api_key, sender_email: s.sender_email, google_places_api_key: s.google_places_api_key,
       checkout_coupon_id: s.checkout_coupon_id, promo_banner: s.promo_banner, plans_override: s.plans_override,
+      video_limits: s.video_limits,
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin-settings"] });
@@ -204,6 +205,40 @@ export default function AdminIntegrations() {
 
       <Group icon={CreditCard} title="Stripe status" desc="Live check of the Stripe prices your Upgrade buttons rely on. If any are missing, run `python setup_stripe.py` on the backend once.">
         <StripeStatus />
+      </Group>
+
+      <Group icon={Video} title="Video testimonial limits" desc="Per-plan caps for duration, size and total number of video testimonials. Leave a field blank to use defaults. 0 count = unlimited.">
+        <div>
+          <Label className="mb-1.5 block text-xs">Minimum duration for any video (seconds)</Label>
+          <Input type="number" min="0" value={s.video_limits?.min_duration_sec ?? ""}
+            onChange={(e) => set("video_limits", { ...(s.video_limits || {}), min_duration_sec: e.target.value === "" ? undefined : Number(e.target.value) })}
+            placeholder="10" data-testid="video-min-duration" />
+        </div>
+        {["pro", "business"].map((tier) => (
+          <div key={tier} className="rounded-xl border border-border p-3">
+            <div className="text-sm font-medium mb-2 capitalize">{tier} plan</div>
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <Label className="mb-1 block text-xs">Max duration (sec)</Label>
+                <Input type="number" min="0" value={s.video_limits?.[tier]?.max_duration_sec ?? ""}
+                  onChange={(e) => set("video_limits", { ...(s.video_limits || {}), [tier]: { ...(s.video_limits?.[tier] || {}), max_duration_sec: e.target.value === "" ? undefined : Number(e.target.value) } })}
+                  placeholder={tier === "pro" ? "60" : "180"} data-testid={`video-${tier}-duration`} />
+              </div>
+              <div>
+                <Label className="mb-1 block text-xs">Max size (MB)</Label>
+                <Input type="number" min="0" value={s.video_limits?.[tier]?.max_size_mb ?? ""}
+                  onChange={(e) => set("video_limits", { ...(s.video_limits || {}), [tier]: { ...(s.video_limits?.[tier] || {}), max_size_mb: e.target.value === "" ? undefined : Number(e.target.value) } })}
+                  placeholder={tier === "pro" ? "50" : "200"} data-testid={`video-${tier}-size`} />
+              </div>
+              <div>
+                <Label className="mb-1 block text-xs">Max count (0 = ∞)</Label>
+                <Input type="number" min="0" value={s.video_limits?.[tier]?.max_count ?? ""}
+                  onChange={(e) => set("video_limits", { ...(s.video_limits || {}), [tier]: { ...(s.video_limits?.[tier] || {}), max_count: e.target.value === "" ? undefined : Number(e.target.value) } })}
+                  placeholder={tier === "pro" ? "30" : "0"} data-testid={`video-${tier}-count`} />
+              </div>
+            </div>
+          </div>
+        ))}
       </Group>
 
       <Group icon={Ticket} title="Sale / Giveaway" desc="Show a banner on the landing page and auto-apply a Stripe coupon on every checkout. Customers can still type their own promo code if this is left blank.">
