@@ -5,7 +5,7 @@ export default function Logo({ className = "", to = "/", size = "text-xl", onDar
   const inner = (
     <span className={`inline-flex items-center gap-2 font-heading font-bold tracking-tight ${size} ${className}`}>
       <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-primary text-primary-foreground font-extrabold">
-        T
+        <img src="/brand/testify-logo-mark.png" />
       </span>
       <span>Testify</span>
     </span>
