@@ -971,8 +971,8 @@ async def submit_testimonial(slug: str, data: m.TestimonialSubmit, request: Requ
     if not _is_unlimited(plan):
         if data.video_url:
             raise HTTPException(status_code=402, detail="Video testimonials are a paid feature. This business is on the Free plan.")
-        if await db.testimonials.count_documents({"workspace_id": ws["id"]}) >= 5:
-            raise HTTPException(status_code=402, detail="This business has reached its Free plan limit of 5 testimonials. Please try again later.")
+        if await db.testimonials.count_documents({"workspace_id": ws["id"]}) >= 10:
+            raise HTTPException(status_code=402, detail="This business has reached its Free plan limit of 10 testimonials. Please try again later.")
     elif data.video_url:
         # Paid plan video cap (0 = unlimited)
         limits = await get_video_limits()
