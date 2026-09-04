@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Save, ShieldCheck, Mail, MapPin, KeyRound, Ticket, DollarSign, CreditCard, CheckCircle2, XCircle, AlertCircle, RefreshCw, Video } from "lucide-react";
+import { Save, ShieldCheck, Mail, MapPin, KeyRound, Ticket, DollarSign, CreditCard, CheckCircle2, XCircle, AlertCircle, RefreshCw, Video, Timer } from "lucide-react";
 import { toast } from "sonner";
 
 function Group({ icon: Icon, title, desc, children }) {
@@ -178,6 +178,8 @@ export default function AdminIntegrations() {
       resend_api_key: s.resend_api_key, sender_email: s.sender_email, google_places_api_key: s.google_places_api_key,
       checkout_coupon_id: s.checkout_coupon_id, promo_banner: s.promo_banner, plans_override: s.plans_override,
       video_limits: s.video_limits,
+      trial_period_days: Number(s.trial_period_days ?? 0),
+      trial_require_card: s.trial_require_card !== false,
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin-settings"] });
@@ -239,6 +241,33 @@ export default function AdminIntegrations() {
             </div>
           </div>
         ))}
+      </Group>
+
+      <Group icon={Timer} title="Free trial" desc="Give new Pro or Business customers a free trial before their card is charged. Trials only apply to workspaces that have never paid before — no repeat looping.">
+        <div>
+          <Label className="mb-1.5 block text-xs">Trial length (days)</Label>
+          <Input
+            type="number" min="0" max="90"
+            value={s.trial_period_days ?? 7}
+            onChange={(e) => set("trial_period_days", e.target.value === "" ? 0 : Number(e.target.value))}
+            placeholder="7"
+            data-testid="set-trial-days"
+          />
+          <p className="text-xs text-muted-foreground mt-1">Set to <strong>0</strong> to disable trials entirely.</p>
+        </div>
+        <div>
+          <Label className="mb-1.5 block text-xs">Card required to start trial</Label>
+          <select
+            className="w-full h-10 rounded-md border border-border bg-background px-3 text-sm"
+            value={String(s.trial_require_card !== false)}
+            onChange={(e) => set("trial_require_card", e.target.value === "true")}
+            data-testid="set-trial-require-card"
+          >
+            <option value="true">Yes — collect card upfront (recommended, higher conversion)</option>
+            <option value="false">No — start trial with just an email</option>
+          </select>
+          <p className="text-xs text-muted-foreground mt-1">Requiring a card typically doubles trial→paid conversion, but adds friction.</p>
+        </div>
       </Group>
 
       <Group icon={Ticket} title="Sale / Giveaway" desc="Show a banner on the landing page and auto-apply a Stripe coupon on every checkout. Customers can still type their own promo code if this is left blank.">

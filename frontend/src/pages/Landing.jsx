@@ -85,6 +85,7 @@ function Nav() {
 export default function Landing() {
   const [pricing, setPricing] = useState([]);
   const [promo, setPromo] = useState("");
+  const [trial, setTrial] = useState({ days: 0, requires_card: true });
   useEffect(() => {
     (async () => {
       try {
@@ -94,6 +95,10 @@ export default function Landing() {
         ]);
         setPricing(Array.isArray(plansRes.data) ? plansRes.data : []);
         setPromo((cfgRes.data && cfgRes.data.promo_banner) || "");
+        setTrial({
+          days: Number(cfgRes.data?.trial_period_days || 0),
+          requires_card: cfgRes.data?.trial_requires_card !== false,
+        });
       } catch (e) {
         setPricing([]);
       }
@@ -215,12 +220,22 @@ export default function Landing() {
             const isFree = p.id === "free";
             const priceLabel = isFree ? "$0" : `$${p.price_monthly}`;
             const period = isFree ? "forever" : "/mo";
+            const showTrial = !isFree && trial.days > 0;
+            const cta = showTrial
+              ? `Start ${trial.days}-day free trial`
+              : (p.cta || (isFree ? "Start free" : "Start free trial"));
             return (
               <div key={p.id} className={`p-8 rounded-3xl border ${p.featured ? "border-primary bg-primary/[0.06] relative" : "border-white/10 bg-white/[0.02]"}`}>
                 {p.featured && <div className="absolute -top-3 left-8 px-3 py-1 rounded-full bg-primary text-white text-xs font-semibold">Most popular</div>}
                 <h3 className="font-heading text-lg font-semibold mb-1">{p.name}</h3>
-                <div className="flex items-end gap-1 mb-6"><span className="font-heading text-4xl font-bold">{priceLabel}</span><span className="text-white/50 text-sm mb-1">{period}</span></div>
-                <Link to="/register"><Button className="w-full mb-6" variant={p.featured ? "default" : "outline"} data-testid={`pricing-${p.id}`}>{p.cta || (isFree ? "Start free" : "Start free trial")}</Button></Link>
+                <div className="flex items-end gap-1 mb-2"><span className="font-heading text-4xl font-bold">{priceLabel}</span><span className="text-white/50 text-sm mb-1">{period}</span></div>
+                {showTrial && (
+                  <p className="text-xs text-primary mb-5" data-testid={`pricing-trial-${p.id}`}>
+                    {trial.days}-day free trial · cancel anytime{trial.requires_card ? "" : " · no card required"}
+                  </p>
+                )}
+                {!showTrial && <div className="mb-4" />}
+                <Link to="/register"><Button className="w-full mb-6" variant={p.featured ? "default" : "outline"} data-testid={`pricing-${p.id}`}>{cta}</Button></Link>
                 <ul className="space-y-3">{(p.features || []).map((f) => <li key={f} className="flex items-start gap-2 text-sm text-white/70"><Check size={16} className="text-primary mt-0.5 flex-shrink-0" /> {f}</li>)}</ul>
               </div>
             );
