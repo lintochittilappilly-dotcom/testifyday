@@ -1,7 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
 
-export default function Logo({ className = "", to = "/", size = "text-xl", onDark = true }) {
+export default function Logo({ className = "", to = "/", size = "text-2xl", onDark = true }) {
   const inner = (
     <span className={`inline-flex items-center gap-2 font-heading font-bold tracking-tight ${size} ${className}`}>
       <img
