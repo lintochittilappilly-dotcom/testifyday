@@ -57,6 +57,8 @@ SETTING_KEYS = [
     "plans_override",
     "video_limits",
     "admin_notify_mode",
+    "trial_period_days",
+    "trial_require_card",
 ]
 
 DEFAULT_VIDEO_LIMITS = {
@@ -78,6 +80,8 @@ def _env_defaults():
         "plans_override": [],
         "video_limits": {},
         "admin_notify_mode": "instant",
+        "trial_period_days": 7,
+        "trial_require_card": True,
     }
 
 

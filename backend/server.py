@@ -27,6 +27,7 @@ from email_service import (
     welcome_submission_email,
     password_reset_email,
     team_invite_email,
+    trial_ending_email,
 )
 import notifications as notif
 from routes.admin_analytics import router as admin_analytics_router
@@ -971,8 +972,8 @@ async def submit_testimonial(slug: str, data: m.TestimonialSubmit, request: Requ
     if not _is_unlimited(plan):
         if data.video_url:
             raise HTTPException(status_code=402, detail="Video testimonials are a paid feature. This business is on the Free plan.")
-        if await db.testimonials.count_documents({"workspace_id": ws["id"]}) >= 10:
-            raise HTTPException(status_code=402, detail="This business has reached its Free plan limit of 10 testimonials. Please try again later.")
+        if await db.testimonials.count_documents({"workspace_id": ws["id"]}) >= 5:
+            raise HTTPException(status_code=402, detail="This business has reached its Free plan limit of 5 testimonials. Please try again later.")
     elif data.video_url:
         # Paid plan video cap (0 = unlimited)
         limits = await get_video_limits()
@@ -1276,6 +1277,8 @@ async def public_config():
     return {
         "recaptcha_site_key": s.get("recaptcha_site_key", ""),
         "promo_banner": s.get("promo_banner", ""),
+        "trial_period_days": int(s.get("trial_period_days") or 0),
+        "trial_requires_card": bool(s.get("trial_require_card", True)),
     }
 
 
@@ -1300,6 +1303,16 @@ async def create_checkout(data: m.CheckoutInput, request: Request):
     origin = data.origin_url.rstrip("/")
     coupon_id = (await get_setting("checkout_coupon_id") or "").strip()
     discounts = [{"coupon": coupon_id}] if coupon_id else None
+
+    # ---------- 7-day trial (admin-configurable, new customers only) ----------
+    settings = await get_settings()
+    trial_days = int(settings.get("trial_period_days") or 0)
+    trial_require_card = bool(settings.get("trial_require_card", True))
+    already_paid = await db.payment_transactions.count_documents({
+        "workspace_id": ws["id"], "payment_status": "paid",
+    })
+    trial_applied = trial_days > 0 and already_paid == 0
+
     kwargs = dict(
         line_items=[{"price": price.id, "quantity": 1}],
         mode="subscription",
@@ -1307,6 +1320,10 @@ async def create_checkout(data: m.CheckoutInput, request: Request):
         cancel_url=f"{origin}/payment/cancel",
         metadata={"user_id": user["id"], "workspace_id": ws["id"], "lookup_key": data.lookup_key},
     )
+    if trial_applied:
+        kwargs["subscription_data"] = {"trial_period_days": trial_days}
+        if not trial_require_card:
+            kwargs["payment_method_collection"] = "if_required"
     if discounts:
         kwargs["discounts"] = discounts
     else:
@@ -1421,6 +1438,36 @@ async def stripe_webhook(request: Request):
         rec = await db.payment_transactions.find_one({"stripe_subscription_id": sub_id})
         if rec and rec.get("workspace_id"):
             await db.workspaces.update_one({"id": rec["workspace_id"]}, {"$set": {"plan": "free", "updated_at": m.now_iso()}})
+    elif t == "customer.subscription.trial_will_end":
+        # Fires ~3 days before trial ends. Notify the customer.
+        try:
+            sub_id = obj.get("id")
+            trial_end = obj.get("trial_end")
+            rec = await db.payment_transactions.find_one({"stripe_subscription_id": sub_id}) if sub_id else None
+            if rec:
+                u = await db.users.find_one({"id": rec.get("user_id")}, {"_id": 0, "email": 1, "name": 1})
+                if u and u.get("email"):
+                    trial_end_str = (
+                        datetime.fromtimestamp(trial_end, tz=timezone.utc).strftime("%b %d, %Y")
+                        if trial_end else "in a few days"
+                    )
+                    origin = (os.environ.get("FRONTEND_URL") or "").rstrip("/") or ""
+                    portal_url = f"{origin}/dashboard/settings" if origin else "/dashboard/settings"
+                    html = trial_ending_email(u.get("name") or "there", rec.get("plan") or "pro", trial_end_str, portal_url)
+                    await send_email(u["email"], "Your Testify trial ends in 3 days", html)
+        except Exception as e:
+            logger.warning(f"trial_will_end notify error: {e}")
+    elif t == "invoice.payment_succeeded":
+        # Trial converted to paid — flip payment_status so analytics reflect the sale.
+        try:
+            sub_id = obj.get("subscription")
+            if sub_id:
+                await db.payment_transactions.update_one(
+                    {"stripe_subscription_id": sub_id, "payment_status": {"$ne": "paid"}},
+                    {"$set": {"payment_status": "paid", "status": "completed", "updated_at": m.now_iso()}},
+                )
+        except Exception as e:
+            logger.warning(f"invoice.payment_succeeded handler error: {e}")
     elif t in ("invoice.payment_failed", "charge.failed"):
         try:
             customer_id = obj.get("customer")

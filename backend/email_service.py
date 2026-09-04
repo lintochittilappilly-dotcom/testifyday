@@ -69,6 +69,21 @@ def password_reset_email(reset_url: str) -> str:
     """
 
 
+def trial_ending_email(user_name: str, plan: str, trial_end_date: str, portal_url: str) -> str:
+    return f"""
+    <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;background:#0a0a0a;color:#fafafa;border-radius:16px">
+      <h1 style="font-size:22px;margin:0 0 8px">Your Testify trial ends soon</h1>
+      <p style="color:#a3a3a3;margin:0 0 20px">Hi {user_name}, your free trial of <strong style="color:#fff">Testify {plan.title()}</strong> ends on <strong style="color:#fff">{trial_end_date}</strong>. Your card will be charged automatically unless you cancel before then.</p>
+      <div style="background:#151515;border:1px solid #262626;border-radius:12px;padding:16px;margin-bottom:20px">
+        <p style="margin:0 0 6px;font-weight:600">Keep your streak going</p>
+        <p style="margin:0;color:#a3a3a3;font-size:14px">Your testimonials, widgets, and integrations stay live — nothing changes on day 8. Just checking in so there are no surprises.</p>
+      </div>
+      <a href="{portal_url}" style="display:inline-block;background:#ff5722;color:#fff;text-decoration:none;padding:12px 24px;border-radius:10px;font-weight:600">Manage subscription</a>
+      <p style="color:#a3a3a3;margin:20px 0 0;font-size:13px">Questions? Reply to this email — we read every message.</p>
+    </div>
+    """
+
+
 def admin_new_signup_email(user_name: str, user_email: str, provider: str, dashboard_url: str) -> str:
     return f"""
     <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;background:#0a0a0a;color:#fafafa;border-radius:16px">

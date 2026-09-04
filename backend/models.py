@@ -190,6 +190,8 @@ class SettingsInput(BaseModel):
     plans_override: Optional[List[Dict[str, Any]]] = None
     video_limits: Optional[Dict[str, Any]] = None
     admin_notify_mode: Optional[Literal["instant", "daily", "off"]] = None
+    trial_period_days: Optional[int] = None
+    trial_require_card: Optional[bool] = None
 
 
 class CheckoutInput(BaseModel):
