@@ -28,6 +28,8 @@ from email_service import (
     password_reset_email,
     team_invite_email,
 )
+import notifications as notif
+from routes.admin_analytics import router as admin_analytics_router
 from captcha import verify_recaptcha
 from settings_store import get_settings, get_setting, update_settings, get_plans, get_video_limits
 import stripe
@@ -94,6 +96,14 @@ async def require_admin(request: Request) -> dict:
     return user
 
 
+async def _notify_admin_signup(user: dict):
+    notif.notify_admin_signup(user)
+
+
+async def _notify_admin_payment_failed(user_email: str, plan: str, amount_cents: int, currency: str, reason: str):
+    notif.notify_admin_payment_failed(user_email, plan, amount_cents, currency, reason)
+
+
 async def _accept_pending_invites(user: dict):
     """Turn any pending team invites for this user's email into memberships."""
     invites = await db.invites.find({"email": user["email"].lower(), "status": "pending"}).to_list(50)
@@ -130,6 +140,7 @@ async def register(data: m.RegisterInput):
     await db.users.insert_one(user)
     await _create_default_workspace(uid, data.name)
     await _accept_pending_invites(user)
+    await _notify_admin_signup(user)
     token = authlib.create_access_token(uid, email)
     return {"token": token, "user": public_user(user)}
 
@@ -171,6 +182,7 @@ async def google_auth(data: m.GoogleSessionInput):
         }
         await db.users.insert_one(user)
         await _create_default_workspace(uid, user["name"])
+        await _notify_admin_signup(user)
     else:
         await db.users.update_one({"id": user["id"]}, {"$set": {"avatar": info.get("picture") or user.get("avatar")}})
     await _accept_pending_invites(user)
@@ -1317,10 +1329,12 @@ async def create_checkout(data: m.CheckoutInput, request: Request):
         except stripe.error.StripeError as e:
             real = getattr(e, "user_message", None) or str(e)
             logger.error(f"Stripe error during checkout: {real}")
+            await _notify_admin_payment_failed(user.get("email"), PLAN_BY_LOOKUP.get(data.lookup_key, "?"), price.unit_amount or 0, price.currency, real)
             raise HTTPException(status_code=400, detail=f"Stripe error: {real}")
     if session is None:
         real = getattr(last_error, "user_message", None) or str(last_error) if last_error else "unknown"
         logger.error(f"All checkout attempts failed. Final Stripe error: {real}")
+        await _notify_admin_payment_failed(user.get("email"), PLAN_BY_LOOKUP.get(data.lookup_key, "?"), price.unit_amount or 0, price.currency, real)
         raise HTTPException(status_code=400, detail=f"Stripe rejected the checkout: {real}")
     await db.payment_transactions.insert_one({
         "session_id": session.id, "user_id": user["id"], "workspace_id": ws["id"],
@@ -1407,9 +1421,31 @@ async def stripe_webhook(request: Request):
         rec = await db.payment_transactions.find_one({"stripe_subscription_id": sub_id})
         if rec and rec.get("workspace_id"):
             await db.workspaces.update_one({"id": rec["workspace_id"]}, {"$set": {"plan": "free", "updated_at": m.now_iso()}})
+    elif t in ("invoice.payment_failed", "charge.failed"):
+        try:
+            customer_id = obj.get("customer")
+            rec = await db.payment_transactions.find_one({"stripe_customer_id": customer_id}, sort=[("updated_at", -1)]) if customer_id else None
+            user_email = None
+            if rec:
+                u = await db.users.find_one({"id": rec.get("user_id")}, {"_id": 0, "email": 1})
+                user_email = (u or {}).get("email")
+            reason = obj.get("failure_message") or obj.get("last_payment_error", {}).get("message") or obj.get("status") or "Payment failed"
+            amount_cents = obj.get("amount_due") or obj.get("amount") or (rec or {}).get("amount") or 0
+            currency = obj.get("currency") or (rec or {}).get("currency") or "usd"
+            plan = (rec or {}).get("plan") or "unknown"
+            if rec:
+                await db.payment_transactions.update_one(
+                    {"session_id": rec["session_id"]},
+                    {"$set": {"payment_status": "failed", "status": "failed",
+                              "failure_reason": reason, "updated_at": m.now_iso()}},
+                )
+            await _notify_admin_payment_failed(user_email, plan, amount_cents, currency, reason)
+        except Exception as e:
+            logger.warning(f"Payment failed webhook notify error: {e}")
     return {"status": "ok"}
 
 
+api.include_router(admin_analytics_router)
 app.include_router(api)
 
 _cors_origins = [o.strip() for o in (os.environ.get("CORS_ORIGINS", "*")).split(",") if o.strip()]
@@ -1444,6 +1480,11 @@ async def startup():
         await authlib.seed_admin()
     except Exception as e:
         logger.error(f"Admin seed failed: {e}")
+    try:
+        notif.start_digest_scheduler()
+        logger.info("Admin digest scheduler started")
+    except Exception as e:
+        logger.warning(f"Digest scheduler start failed: {e}")
 
 
 @app.on_event("shutdown")

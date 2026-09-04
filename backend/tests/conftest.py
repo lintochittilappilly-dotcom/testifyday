@@ -8,6 +8,13 @@ from pymongo import MongoClient
 
 backend_env = dotenv_values("/app/backend/.env")
 
+# In-process tests (e.g. test_upload_size_caps.py) import backend modules directly,
+# and those modules read os.environ at import time. Export backend/.env values so the
+# imports succeed without overriding anything already set in the process environment.
+for _k, _v in backend_env.items():
+    if _v is not None:
+        os.environ.setdefault(_k, _v)
+
 BASE_URL = (os.environ.get("REACT_APP_BACKEND_URL") or "http://localhost:8001").rstrip("/")
 API = f"{BASE_URL}/api"
 

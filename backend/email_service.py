@@ -69,6 +69,36 @@ def password_reset_email(reset_url: str) -> str:
     """
 
 
+def admin_new_signup_email(user_name: str, user_email: str, provider: str, dashboard_url: str) -> str:
+    return f"""
+    <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;background:#0a0a0a;color:#fafafa;border-radius:16px">
+      <h1 style="font-size:22px;margin:0 0 8px">New signup on Testify</h1>
+      <p style="color:#a3a3a3;margin:0 0 20px"><strong style="color:#fff">{user_name}</strong> just created an account.</p>
+      <div style="background:#151515;border:1px solid #262626;border-radius:12px;padding:16px;margin-bottom:20px">
+        <p style="margin:0 0 4px"><strong>Email:</strong> {user_email}</p>
+        <p style="margin:0"><strong>Provider:</strong> {provider}</p>
+      </div>
+      <a href="{dashboard_url}" style="display:inline-block;background:#ff5722;color:#fff;text-decoration:none;padding:12px 24px;border-radius:10px;font-weight:600">Open admin dashboard</a>
+    </div>
+    """
+
+
+def admin_payment_failed_email(user_email: str, plan: str, amount: str, reason: str, dashboard_url: str) -> str:
+    return f"""
+    <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;background:#0a0a0a;color:#fafafa;border-radius:16px">
+      <h1 style="font-size:22px;margin:0 0 8px;color:#f87171">Payment failed</h1>
+      <p style="color:#a3a3a3;margin:0 0 20px">A checkout attempt failed on Testify. Consider reaching out.</p>
+      <div style="background:#151515;border:1px solid #262626;border-radius:12px;padding:16px;margin-bottom:20px">
+        <p style="margin:0 0 4px"><strong>Customer:</strong> {user_email}</p>
+        <p style="margin:0 0 4px"><strong>Plan:</strong> {plan}</p>
+        <p style="margin:0 0 4px"><strong>Amount:</strong> {amount}</p>
+        <p style="margin:0;color:#f87171"><strong>Reason:</strong> {reason}</p>
+      </div>
+      <a href="{dashboard_url}" style="display:inline-block;background:#ff5722;color:#fff;text-decoration:none;padding:12px 24px;border-radius:10px;font-weight:600">Open admin dashboard</a>
+    </div>
+    """
+
+
 def team_invite_email(business: str, inviter: str, role: str, url: str, has_account: bool) -> str:
     action = "Log in to join" if has_account else "Create your free account to join"
     return f"""

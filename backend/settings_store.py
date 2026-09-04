@@ -56,6 +56,7 @@ SETTING_KEYS = [
     "promo_banner",
     "plans_override",
     "video_limits",
+    "admin_notify_mode",
 ]
 
 DEFAULT_VIDEO_LIMITS = {
@@ -76,6 +77,7 @@ def _env_defaults():
         "promo_banner": "",
         "plans_override": [],
         "video_limits": {},
+        "admin_notify_mode": "instant",
     }
 
 

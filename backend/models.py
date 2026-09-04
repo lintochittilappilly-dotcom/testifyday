@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Literal
 from pydantic import BaseModel, Field, EmailStr
 
 
@@ -189,6 +189,7 @@ class SettingsInput(BaseModel):
     promo_banner: Optional[str] = None
     plans_override: Optional[List[Dict[str, Any]]] = None
     video_limits: Optional[Dict[str, Any]] = None
+    admin_notify_mode: Optional[Literal["instant", "daily", "off"]] = None
 
 
 class CheckoutInput(BaseModel):
