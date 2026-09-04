@@ -7,7 +7,7 @@ export default function Logo({ className = "", to = "/", size = "text-xl", onDar
       <img
         src="/brand/testify-logo-mark.png"
         alt="Testify logo"
-        className="w-8 h-8 rounded-lg object-contain"
+        className="w-20 h-20 rounded-lg object-contain"
         loading="eager"
         decoding="async"
       />
