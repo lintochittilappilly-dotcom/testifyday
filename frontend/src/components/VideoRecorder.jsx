@@ -28,6 +28,23 @@ export default function VideoRecorder({ onUploaded, accent = "#ff5722", maxDurat
 
   useEffect(() => () => { stopStream(); if (timerRef.current) clearInterval(timerRef.current); }, [stopStream]);
 
+  // Attach the camera stream after the <video> element mounts. This runs whenever
+  // we enter live/recording state — critical on iOS Safari where the ref doesn't
+  // exist yet at the moment getUserMedia resolves (video is conditionally rendered).
+  useEffect(() => {
+    if ((state === "live" || state === "recording") && videoRef.current && streamRef.current) {
+      const v = videoRef.current;
+      if (v.srcObject !== streamRef.current) {
+        v.muted = true;
+        v.setAttribute("muted", "");
+        v.playsInline = true;
+        v.srcObject = streamRef.current;
+        const p = v.play();
+        if (p && typeof p.catch === "function") p.catch(() => {});
+      }
+    }
+  }, [state]);
+
   const startCamera = async () => {
     setError("");
     try {
@@ -35,11 +52,7 @@ export default function VideoRecorder({ onUploaded, accent = "#ff5722", maxDurat
         video: { facingMode: "user", width: { ideal: 720 } }, audio: true,
       });
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.muted = true;
-        await videoRef.current.play().catch(() => {});
-      }
+      // The effect above wires the stream into the <video> once React mounts it.
       setState("live");
     } catch (e) {
       if (e.name === "NotAllowedError") setError("Camera & microphone permission denied. Please allow access and try again.");
@@ -124,7 +137,14 @@ export default function VideoRecorder({ onUploaded, accent = "#ff5722", maxDurat
     <div className="w-full" data-testid="video-recorder">
       <div className="relative w-full rounded-2xl overflow-hidden bg-black" style={{ aspectRatio: "3/4", maxHeight: 420 }}>
         {(state === "live" || state === "recording") && (
-          <video ref={videoRef} playsInline muted className="w-full h-full object-cover" />
+          <video
+            ref={videoRef}
+            autoPlay
+            muted
+            playsInline
+            webkit-playsinline="true"
+            className="w-full h-full object-cover"
+          />
         )}
         {(state === "recorded" || state === "uploading" || state === "done") && previewUrl && (
           <video src={previewUrl} controls playsInline className="w-full h-full object-cover" />
