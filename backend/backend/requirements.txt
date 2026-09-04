@@ -1,0 +1,16 @@
+fastapi==0.110.1
+uvicorn[standard]==0.25.0
+starlette==0.37.2
+python-dotenv==1.0.1
+python-multipart==0.0.9
+motor==3.3.1
+pymongo==4.6.3
+pydantic[email]==2.7.4
+bcrypt==4.1.3
+PyJWT==2.8.0
+requests==2.32.3
+resend==2.4.0
+stripe==9.6.0
+boto3==1.34.140
+google-auth==2.30.0
+dnspython==2.6.1
