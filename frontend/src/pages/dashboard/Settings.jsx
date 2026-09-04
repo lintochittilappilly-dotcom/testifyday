@@ -12,6 +12,7 @@ import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Save, Upload, Loader2, Sun, Moon, Crown } from "lucide-react";
 import { toast } from "sonner";
 import AdminIntegrations from "@/components/dashboard/AdminIntegrations";
+import AdminAnalytics from "@/components/dashboard/AdminAnalytics";
 import Billing from "@/components/dashboard/Billing";
 import TeamMembers from "@/components/dashboard/TeamMembers";
 import CustomDomain from "@/components/dashboard/CustomDomain";
@@ -92,6 +93,7 @@ export default function Settings() {
 
         <CustomDomain workspace={ws} />
 
+        {user?.is_admin && <AdminAnalytics />}
         {user?.is_admin && <AdminIntegrations />}
       </div>
     </div>
