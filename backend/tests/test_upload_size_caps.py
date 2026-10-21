@@ -18,13 +18,14 @@ singleton bound to the first loop that uses it.
 import asyncio
 import io
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException, UploadFile
 from starlette.datastructures import Headers
 
-sys.path.insert(0, "/app/backend")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 MB = 1024 * 1024
 

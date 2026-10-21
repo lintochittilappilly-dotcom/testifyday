@@ -1,26 +1,25 @@
 """Fix 4: with ADMIN_EMAIL unset the backend must fail closed.
 
-This module rewrites /app/backend/.env (ADMIN_EMAIL commented out), restarts the
+This module rewrites backend/.env (ADMIN_EMAIL commented out), restarts the
 backend, registers a user with the old hardcoded fallback email admin@testify.com
 and asserts they get NO admin powers. The env file and backend are restored in the
 fixture teardown.
 """
 import shutil
-import subprocess
 import time
 import uuid
 
 import pytest
 import requests
 
-from conftest import API, auth
+from conftest import API, BACKEND_DIR, auth, restart_backend
 
-ENV_PATH = "/app/backend/.env"
+ENV_PATH = str(BACKEND_DIR / ".env")
 BACKUP = "/tmp/backend_env_backup_it2"
 
 
 def _restart_and_wait():
-    subprocess.run(["sudo", "supervisorctl", "restart", "backend"], capture_output=True, timeout=90)
+    restart_backend()
     deadline = time.time() + 60
     while time.time() < deadline:
         try:

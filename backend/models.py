@@ -189,6 +189,8 @@ class SettingsInput(BaseModel):
     promo_banner: Optional[str] = None
     plans_override: Optional[List[Dict[str, Any]]] = None
     video_limits: Optional[Dict[str, Any]] = None
+    homepage_wall_slug: Optional[str] = None
+    ai_captions_enabled: Optional[bool] = None
     admin_notify_mode: Optional[Literal["instant", "daily", "off"]] = None
     trial_period_days: Optional[int] = None
     trial_require_card: Optional[bool] = None

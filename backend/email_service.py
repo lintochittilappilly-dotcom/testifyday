@@ -58,6 +58,30 @@ def welcome_submission_email(customer_name: str, business: str) -> str:
     """
 
 
+def request_testimonial_email(business: str, message: str, collect_url: str, recipient_name: str = "") -> str:
+    """Automated "would you leave us a testimonial?" ask."""
+    greeting = f"Hi {recipient_name}," if recipient_name else "Hi there,"
+    body = message.strip() or (
+        f"Would you mind sharing a couple of sentences about your experience with {business}? "
+        "It takes about a minute and helps other people decide if we're a fit."
+    )
+    return f"""
+    <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;background:#0a0a0a;color:#fafafa;border-radius:16px">
+      <h1 style="font-size:22px;margin:0 0 8px">{greeting}</h1>
+      <p style="color:#a3a3a3;margin:0 0 18px;line-height:1.6">
+        {body}
+      </p>
+      <a href="{collect_url}" style="display:inline-block;background:#ff5722;color:#fff;text-decoration:none;padding:12px 24px;border-radius:10px;font-weight:600">Leave a testimonial</a>
+      <p style="color:#737373;font-size:13px;margin:20px 0 0">
+        You can record a short video or just type a few lines — no account needed.
+      </p>
+      <p style="color:#525252;font-size:12px;margin:12px 0 0">
+        Sent by {business} via Testify. If you'd rather not hear from us again, just reply and we'll stop.
+      </p>
+    </div>
+    """
+
+
 def password_reset_email(reset_url: str) -> str:
     return f"""
     <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px">

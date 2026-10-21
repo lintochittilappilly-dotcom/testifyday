@@ -28,7 +28,8 @@ class TestPlansDefaults:
         assert by_id["free"]["price_monthly"] == 0
         assert by_id["pro"]["price_monthly"] == 29
         assert by_id["business"]["price_monthly"] == 79
-        assert "Up to 5 testimonials" in by_id["free"]["features"]
+        assert "Up to 10 testimonials" in by_id["free"]["features"]
+        assert "Unlimited widgets" in by_id["free"]["features"]
         assert any("image" in f.lower() for f in by_id["free"]["features"])
         assert by_id["pro"]["lookup_monthly"] == "pro_monthly"
         assert by_id["business"]["lookup_yearly"] == "business_yearly"
@@ -194,12 +195,12 @@ class TestFreePlanSubmit:
                                            "first_name": "TEST_Txt"})
         assert doc is not None and doc["text"] == "Great product, loved it!"
 
-    def test_limit_five_enforced(self, api, free_collection, mongo):
+    def test_free_limit_ten_enforced(self, api, free_collection, mongo):
         ws_id = free_collection["ws"]["id"]
         col = free_collection["col"]
         existing = mongo.testimonials.count_documents({"workspace_id": ws_id})
         filler = []
-        for i in range(max(0, 5 - existing)):
+        for i in range(max(0, 10 - existing)):
             filler.append({
                 "id": f"tst_TESTfill{i}", "workspace_id": ws_id, "collection_id": col["id"],
                 "first_name": f"TEST_Fill{i}", "last_name": "", "email": "", "text": "filler",
@@ -207,16 +208,28 @@ class TestFreePlanSubmit:
             })
         if filler:
             mongo.testimonials.insert_many(filler)
-        assert mongo.testimonials.count_documents({"workspace_id": ws_id}) >= 5
+        assert mongo.testimonials.count_documents({"workspace_id": ws_id}) >= 10
         r = api.post(f"{API}/public/collection/{col['slug']}/submit",
-                     json=self._payload(first_name="TEST_Sixth", text="sixth one"))
+                     json=self._payload(first_name="TEST_Eleventh", text="eleventh one"))
         assert r.status_code == 402, f"expected 402 got {r.status_code}: {r.text[:300]}"
-        assert "5 testimonials" in r.json()["detail"]
+        assert "10 testimonials" in r.json()["detail"]
 
-    def test_free_plan_second_collection_blocked(self, api, free_user):
+    def test_free_plan_allows_extra_collections_and_widgets(self, api, free_user, free_collection):
+        """Collections and widgets are unlimited on Free — only testimonials are capped."""
         r = api.post(f"{API}/collections", headers=auth(free_user["token"]),
                      json={"name": "TEST_ Second page"})
-        assert r.status_code == 402, f"expected 402 got {r.status_code}: {r.text[:200]}"
+        assert r.status_code == 200, f"second collection should be allowed: {r.status_code} {r.text[:200]}"
+        c2 = r.json()
+        w1 = api.post(f"{API}/widgets", headers=auth(free_user["token"]),
+                      json={"name": "TEST_W1", "type": "grid", "configuration": {}})
+        assert w1.status_code == 200, f"first widget failed: {w1.status_code} {w1.text[:200]}"
+        w2 = api.post(f"{API}/widgets", headers=auth(free_user["token"]),
+                      json={"name": "TEST_W2", "type": "carousel", "configuration": {}})
+        assert w2.status_code == 200, f"second widget should be allowed: {w2.status_code} {w2.text[:200]}"
+        cols = api.get(f"{API}/collections", headers=auth(free_user["token"])).json()
+        assert any(c["id"] == c2["id"] for c in cols), "second collection missing from list"
+        wids = [w["id"] for w in api.get(f"{API}/widgets", headers=auth(free_user["token"])).json()]
+        assert w1.json()["id"] in wids and w2.json()["id"] in wids, "widgets missing from list"
 
     def test_list_testimonials(self, api, free_user):
         r = api.get(f"{API}/testimonials", headers=auth(free_user["token"]))

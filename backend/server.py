@@ -2,6 +2,7 @@ import os
 import re
 import time
 import uuid
+import asyncio
 import logging
 import secrets
 from datetime import datetime, timezone, timedelta
@@ -30,7 +31,10 @@ from email_service import (
     trial_ending_email,
 )
 import notifications as notif
+import integrations as integ
+import transcription
 from routes.admin_analytics import router as admin_analytics_router
+from routes.integrations import router as integrations_router
 from captcha import verify_recaptcha
 from settings_store import get_settings, get_setting, update_settings, get_plans, get_video_limits
 import stripe
@@ -40,6 +44,11 @@ stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 
 PLAN_BY_LOOKUP = {"pro_monthly": "pro", "pro_yearly": "pro", "business_monthly": "business", "business_yearly": "business"}
+
+# The only thing the Free plan caps is total testimonials. Collections and widgets
+# are unlimited on every plan: widgets are the surface that spreads the product,
+# so gating them costs more growth than it wins in upgrades.
+FREE_TESTIMONIAL_LIMIT = 10
 
 
 def _is_unlimited(plan):
@@ -368,9 +377,6 @@ async def list_collections(request: Request):
 async def create_collection(data: m.CollectionInput, request: Request):
     user = await authlib.get_current_user(request)
     ws = await authlib.get_user_workspace(user)
-    if not _is_unlimited(ws.get("plan", "free")):
-        if await db.collections.count_documents({"workspace_id": ws["id"]}) >= 1:
-            raise HTTPException(status_code=402, detail="Free plan allows 1 collection page. Upgrade to Pro for unlimited.")
     slug = await unique_slug(db.collections, data.slug or data.name)
     doc = data.model_dump()
     doc["slug"] = slug
@@ -469,7 +475,15 @@ async def update_testimonial(tid: str, data: m.TestimonialUpdate, request: Reque
         upd["approved_at"] = m.now_iso()
     upd["updated_at"] = m.now_iso()
     await db.testimonials.update_one({"id": tid}, {"$set": upd})
-    return await db.testimonials.find_one({"id": tid}, {"_id": 0})
+    doc = await db.testimonials.find_one({"id": tid}, {"_id": 0})
+    col = await db.collections.find_one({"id": doc.get("collection_id")}, {"_id": 0}) if doc.get("collection_id") else None
+    try:
+        if upd.get("status") == "approved" and t.get("status") != "approved":
+            await integ.emit(ws["id"], "testimonial.approved", _webhook_testimonial(doc, col))
+        await integ.emit(ws["id"], "testimonial.updated", _webhook_testimonial(doc, col))
+    except Exception as e:
+        logger.warning(f"testimonial update webhook failed: {e}")
+    return doc
 
 
 @api.post("/testimonials/{tid}/status")
@@ -481,7 +495,27 @@ async def set_status(tid: str, data: m.StatusInput, request: Request):
     if data.status == "approved":
         upd["approved_at"] = m.now_iso()
     await db.testimonials.update_one({"id": tid}, {"$set": upd})
-    return await db.testimonials.find_one({"id": tid}, {"_id": 0})
+    doc = await db.testimonials.find_one({"id": tid}, {"_id": 0})
+    if data.status == "approved":
+        col = await db.collections.find_one({"id": doc.get("collection_id")}, {"_id": 0}) if doc.get("collection_id") else None
+        try:
+            await integ.emit(ws["id"], "testimonial.approved", _webhook_testimonial(doc, col))
+        except Exception as e:
+            logger.warning(f"testimonial.approved webhook failed: {e}")
+    return doc
+
+
+@api.post("/testimonials/{tid}/transcribe")
+async def transcribe_testimonial(tid: str, request: Request):
+    """(Re)generate AI captions for one video testimonial."""
+    ws, t = await _owned_testimonial(request, tid)
+    if not t.get("video_url"):
+        raise HTTPException(status_code=400, detail="Only video testimonials can be transcribed")
+    if not await transcription.is_enabled():
+        raise HTTPException(status_code=402, detail="AI captions are turned off. Enable them in Admin → Platform integrations.")
+    job_id = await transcription.enqueue(ws["id"], tid, t["video_url"])
+    asyncio.create_task(transcription.process_job(job_id))
+    return {"ok": True, "job_id": job_id}
 
 
 @api.post("/testimonials/{tid}/feature")
@@ -708,9 +742,6 @@ async def list_widgets(request: Request):
 async def create_widget(data: m.WidgetInput, request: Request):
     user = await authlib.get_current_user(request)
     ws = await authlib.get_user_workspace(user)
-    if not _is_unlimited(ws.get("plan", "free")):
-        if await db.widgets.count_documents({"workspace_id": ws["id"]}) >= 1:
-            raise HTTPException(status_code=402, detail="Free plan allows 1 widget. Upgrade to Pro for unlimited widgets.")
     config = {**DEFAULT_WIDGET_CONFIG, **(data.configuration or {})}
     widget = {
         "id": m.gen_id("wid_"),
@@ -972,8 +1003,11 @@ async def submit_testimonial(slug: str, data: m.TestimonialSubmit, request: Requ
     if not _is_unlimited(plan):
         if data.video_url:
             raise HTTPException(status_code=402, detail="Video testimonials are a paid feature. This business is on the Free plan.")
-        if await db.testimonials.count_documents({"workspace_id": ws["id"]}) >= 5:
-            raise HTTPException(status_code=402, detail="This business has reached its Free plan limit of 5 testimonials. Please try again later.")
+        if await db.testimonials.count_documents({"workspace_id": ws["id"]}) >= FREE_TESTIMONIAL_LIMIT:
+            raise HTTPException(
+                status_code=402,
+                detail=f"This business has reached its Free plan limit of {FREE_TESTIMONIAL_LIMIT} testimonials. Please try again later.",
+            )
     elif data.video_url:
         # Paid plan video cap (0 = unlimited)
         limits = await get_video_limits()
@@ -1025,10 +1059,51 @@ async def submit_testimonial(slug: str, data: m.TestimonialSubmit, request: Requ
                          new_testimonial_email(f"{doc['first_name']} {doc['last_name']}".strip(), preview, bool(doc["video_url"]), view_url))
     if doc["email"]:
         await send_email(doc["email"], f"Thanks for your testimonial!", welcome_submission_email(doc["first_name"], ws.get("name")))
+    # Fan out to webhooks (Zapier, Slack relays, CRMs). Errors never block a submit.
+    try:
+        await integ.emit(ws["id"], "testimonial.submitted", _webhook_testimonial(doc, col))
+    except Exception as e:
+        logger.warning(f"testimonial.submitted webhook failed: {e}")
+    # AI captions: queued, never inline — the customer should not wait on Whisper.
+    if doc.get("video_url") and _is_unlimited(plan):
+        try:
+            if await transcription.is_enabled():
+                await transcription.enqueue(ws["id"], doc["id"], doc["video_url"])
+        except Exception as e:
+            logger.warning(f"caption enqueue failed: {e}")
     return {"ok": True, "thank_you_message": col.get("thank_you_message"), "redirect_url": col.get("redirect_url")}
 
 
 # ---------- Public widget ----------
+def _webhook_testimonial(t: dict, col: dict | None = None) -> dict:
+    """Stable payload shape for outbound webhooks / Zapier triggers."""
+    origin = (os.environ.get("CORS_ORIGINS", "").split(",")[0] or "").strip()
+    return {
+        "testimonial": {
+            "id": t.get("id"),
+            "first_name": t.get("first_name"),
+            "last_name": t.get("last_name"),
+            "email": t.get("email"),
+            "company": t.get("company"),
+            "role": t.get("role"),
+            "text": t.get("text"),
+            "rating": t.get("rating"),
+            "status": t.get("status"),
+            "has_video": bool(t.get("video_url")),
+            "has_image": bool(t.get("image_url")),
+            "tags": t.get("tags") or [],
+            "featured": bool(t.get("featured")),
+            "created_at": t.get("created_at"),
+        },
+        "collection": {
+            "id": (col or {}).get("id") or t.get("collection_id"),
+            "name": (col or {}).get("name"),
+            "slug": (col or {}).get("slug"),
+        },
+        "dashboard_url": f"{origin}/dashboard/testimonials/{t.get('id')}",
+    }
+
+
 def _public_testimonial(t: dict) -> dict:
     return {
         "id": t["id"], "first_name": t.get("first_name"), "last_name": t.get("last_name"),
@@ -1036,7 +1111,22 @@ def _public_testimonial(t: dict) -> dict:
         "text": t.get("text"), "image_url": t.get("image_url"), "video_url": t.get("video_url"),
         "video_thumbnail_url": t.get("video_thumbnail_url"), "rating": t.get("rating"),
         "featured": t.get("featured"),
+        "transcript": t.get("transcript"),
+        # Caption track for the <video> element; only public once approved.
+        "captions_url": f"/api/public/testimonial/{t['id']}/captions.vtt" if t.get("captions_vtt") else None,
     }
+
+
+@api.get("/public/testimonial/{tid}/captions.vtt")
+async def public_captions(tid: str):
+    t = await db.testimonials.find_one({"id": tid}, {"_id": 0, "captions_vtt": 1, "status": 1})
+    if not t or not t.get("captions_vtt") or t.get("status") != "approved":
+        raise HTTPException(status_code=404, detail="Captions not found")
+    return Response(
+        content=t["captions_vtt"],
+        media_type="text/vtt; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
 
 
 @api.get("/public/wall/{ws_slug}")
@@ -1058,7 +1148,27 @@ async def public_wall(ws_slug: str):
         "testimonials": [_public_testimonial(t) for t in items],
         "count": len(items),
         "branding": ws.get("plan", "free") == "free",
+        # Relative on purpose: the caller (edge middleware / frontend) knows the
+        # public origin, the backend only knows its own host.
+        "og_image": f"/api/og/wall/{ws.get('slug')}.png",
     }
+
+
+@api.get("/og/wall/{slug}.png")
+async def wall_og_image(slug: str):
+    """1200x630 social card for a public wall, used by og:image on /wall/<slug>."""
+    from og_image import render_wall_card
+
+    ws = await db.workspaces.find_one({"slug": slug}, {"_id": 0, "name": 1, "primary_color": 1, "id": 1})
+    if not ws:
+        raise HTTPException(status_code=404, detail="Wall not found")
+    count = await db.testimonials.count_documents({"workspace_id": ws["id"], "status": "approved"})
+    png = render_wall_card(ws.get("name") or "Testimonials", count, ws.get("primary_color") or "#ff5722")
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=3600, s-maxage=3600"},
+    )
 
 
 @api.get("/public/widget/{wid}")
@@ -1279,6 +1389,8 @@ async def public_config():
         "promo_banner": s.get("promo_banner", ""),
         "trial_period_days": int(s.get("trial_period_days") or 0),
         "trial_requires_card": bool(s.get("trial_require_card", True)),
+        # Workspace slug whose approved testimonials are shown on the homepage.
+        "homepage_wall_slug": s.get("homepage_wall_slug", ""),
     }
 
 
@@ -1493,6 +1605,7 @@ async def stripe_webhook(request: Request):
 
 
 api.include_router(admin_analytics_router)
+api.include_router(integrations_router)
 app.include_router(api)
 
 _cors_origins = [o.strip() for o in (os.environ.get("CORS_ORIGINS", "*")).split(",") if o.strip()]
@@ -1532,6 +1645,16 @@ async def startup():
         logger.info("Admin digest scheduler started")
     except Exception as e:
         logger.warning(f"Digest scheduler start failed: {e}")
+    try:
+        integ.start_worker()
+        logger.info("Webhook / request-email worker started")
+    except Exception as e:
+        logger.warning(f"Integration worker start failed: {e}")
+    try:
+        transcription.start_worker()
+        logger.info("Transcription worker started")
+    except Exception as e:
+        logger.warning(f"Transcription worker start failed: {e}")
 
 
 @app.on_event("shutdown")

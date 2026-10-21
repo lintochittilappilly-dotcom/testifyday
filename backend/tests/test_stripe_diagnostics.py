@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 
 from conftest import API, ADMIN_EMAIL, ADMIN_PASSWORD, auth
 
-BACKEND_DIR = Path("/app/backend")
+BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
@@ -78,7 +78,7 @@ class TestLiveHttp:
         plans = r.json()
         free = [p for p in plans if p.get("id") == "free" or p.get("name", "").lower() == "free"]
         assert free, plans
-        assert any("Up to 5 testimonials" in f for f in free[0]["features"]), free[0]
+        assert any("Up to 10 testimonials" in f for f in free[0]["features"]), free[0]
 
 
 # ---------- Layer 2: in-process with monkeypatched stripe ----------
@@ -528,5 +528,5 @@ class TestIteration9EscapeHatch:
 
 class TestNoLegacyMessage:
     def test_server_py_has_no_could_not_start_checkout(self):
-        src = Path("/app/backend/server.py").read_text()
+        src = (BACKEND_DIR / "server.py").read_text()
         assert "Could not start checkout" not in src, "legacy generic message still present in server.py"

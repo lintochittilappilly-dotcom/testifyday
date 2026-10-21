@@ -1,12 +1,41 @@
 import os
+import subprocess
 import uuid
+from pathlib import Path
 
 import pytest
 import requests
 from dotenv import dotenv_values
 from pymongo import MongoClient
 
-backend_env = dotenv_values("/app/backend/.env")
+# Resolve backend/.env relative to this repo first so the suite runs outside the
+# original /app container layout; TESTIFY_ENV_FILE can point at an explicit file.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_ENV_CANDIDATES = [
+    os.environ.get("TESTIFY_ENV_FILE"),
+    os.path.join(os.path.dirname(_HERE), ".env"),
+    "/app/backend/.env",
+]
+backend_env = {}
+for _candidate in _ENV_CANDIDATES:
+    if _candidate and os.path.exists(_candidate):
+        backend_env = dotenv_values(_candidate)
+        break
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+
+
+def restart_backend():
+    """Restart the backend under test.
+
+    CI used `sudo supervisorctl restart backend`; TESTIFY_BACKEND_RESTART_CMD lets a
+    local run supply an equivalent command (uvicorn boot script).
+    """
+    override = os.environ.get("TESTIFY_BACKEND_RESTART_CMD")
+    if override:
+        subprocess.run(override, shell=True, capture_output=True, timeout=120)
+    else:
+        subprocess.run(["sudo", "supervisorctl", "restart", "backend"], capture_output=True, timeout=90)
 
 # In-process tests (e.g. test_upload_size_caps.py) import backend modules directly,
 # and those modules read os.environ at import time. Export backend/.env values so the
@@ -74,6 +103,44 @@ def nonadmin_user(api):
     return _register(api, "nonadmin")
 
 
+@pytest.fixture(scope="session")
+def approved_wall(api, mongo):
+    """A workspace with three approved testimonials, i.e. a live public wall."""
+    user = _register(api, "wall")
+    headers = auth(user["token"])
+    r = api.post(
+        f"{API}/onboarding",
+        headers=headers,
+        json={"business_name": f"TEST Wall {uuid.uuid4().hex[:6]}", "primary_color": "#ff5722"},
+        timeout=30,
+    )
+    if r.status_code != 200:
+        pytest.fail(f"onboarding failed {r.status_code}: {r.text[:300]}")
+    ws = api.get(f"{API}/workspace", headers=headers, timeout=30).json()
+    docs = [
+        {
+            "id": f"tst_wall_{i}_{uuid.uuid4().hex[:4]}",
+            "workspace_id": ws["id"],
+            "collection_id": "col_wall",
+            "first_name": name,
+            "last_name": "",
+            "email": "",
+            "company": company,
+            "role": "Founder",
+            "text": f"TEST_Wall quote {i}",
+            "rating": 5,
+            "status": "approved",
+            "featured": True,
+            "tags": [],
+            "approved_at": f"2026-01-0{i + 1}T00:00:00+00:00",
+            "created_at": "2026-01-01T00:00:00+00:00",
+        }
+        for i, (name, company) in enumerate([("TEST_Priya", "Northwind"), ("TEST_Marcus", "Bright Labs"), ("TEST_Elena", "Studio Row")])
+    ]
+    mongo.testimonials.insert_many(docs)
+    return {"slug": ws["slug"], "ws_id": ws["id"], "token": user["token"]}
+
+
 @pytest.fixture(scope="session", autouse=True)
 def cleanup_test_data(request):
     """Remove test-created users/workspaces/collections/testimonials after the session."""
@@ -105,10 +172,9 @@ def reset_rate_limit():
 
     Restarting the backend clears it so submit-heavy test classes stay independent.
     """
-    import subprocess
     import time
 
-    subprocess.run(["sudo", "supervisorctl", "restart", "backend"], capture_output=True, timeout=90)
+    restart_backend()
     deadline = time.time() + 60
     while time.time() < deadline:
         try:

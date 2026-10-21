@@ -227,13 +227,21 @@ class TestVideoCountCap:
         } for _ in range(n)]
         mongo.testimonials.insert_many(docs)
 
-    def test_pro_capped_at_30_videos(self, api, mongo, pro_ws, reset_rate_limit):
+    def test_pro_capped_at_100_videos(self, api, mongo, pro_ws, reset_rate_limit):
         mongo.testimonials.delete_many({"workspace_id": pro_ws["ws"]["id"]})
-        self._seed_videos(mongo, pro_ws["ws"]["id"], pro_ws["col"]["id"], 30)
+        self._seed_videos(mongo, pro_ws["ws"]["id"], pro_ws["col"]["id"], 100)
         r = api.post(f"{API}/public/collection/{pro_ws['col']['slug']}/submit",
                      json=_payload(video_url="https://example.com/new.mp4", text="capped?"))
         assert r.status_code == 402, f"expected 402 video cap, got {r.status_code}: {r.text[:300]}"
-        assert "plan limit of 30 video testimonials" in r.json()["detail"], r.text
+        assert "plan limit of 100 video testimonials" in r.json()["detail"], r.text
+
+    def test_pro_allows_31st_video(self, api, mongo, pro_ws, reset_rate_limit):
+        """Pro used to hard-stop at 30 videos, two steps above the $29 price point."""
+        mongo.testimonials.delete_many({"workspace_id": pro_ws["ws"]["id"]})
+        self._seed_videos(mongo, pro_ws["ws"]["id"], pro_ws["col"]["id"], 30)
+        r = api.post(f"{API}/public/collection/{pro_ws['col']['slug']}/submit",
+                     json=_payload(first_name="TEST_Pro31", video_url="https://example.com/31.mp4"))
+        assert r.status_code == 200, f"Pro must accept a 31st video: {r.status_code} {r.text[:300]}"
 
     def test_pro_text_submit_still_allowed_at_video_cap(self, api, pro_ws):
         r = api.post(f"{API}/public/collection/{pro_ws['col']['slug']}/submit",
@@ -242,10 +250,13 @@ class TestVideoCountCap:
 
     def test_pro_cap_respects_admin_override(self, api, mongo, admin_token, pro_ws, reset_video_limits):
         api.put(f"{API}/admin/settings", headers=auth(admin_token),
-                json={"video_limits": {"pro": {"max_count": 40}}})
+                json={"video_limits": {"pro": {"max_count": 5}}})
+        mongo.testimonials.delete_many({"workspace_id": pro_ws["ws"]["id"]})
+        self._seed_videos(mongo, pro_ws["ws"]["id"], pro_ws["col"]["id"], 5)
         r = api.post(f"{API}/public/collection/{pro_ws['col']['slug']}/submit",
                      json=_payload(first_name="TEST_Override", video_url="https://example.com/o.mp4"))
-        assert r.status_code == 200, f"override max_count=40 should allow 31st video: {r.status_code} {r.text[:300]}"
+        assert r.status_code == 402, f"override max_count=5 should block the 6th video: {r.status_code} {r.text[:300]}"
+        assert "plan limit of 5 video testimonials" in r.json()["detail"], r.text
 
     def test_business_unlimited_videos(self, api, mongo, business_ws, reset_rate_limit):
         mongo.testimonials.delete_many({"workspace_id": business_ws["ws"]["id"]})
