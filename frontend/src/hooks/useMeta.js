@@ -21,7 +21,7 @@ function setLink(rel, href) {
 /**
  * Sets SEO + Open Graph + Twitter meta tags for public pages (SPA-rendered).
  */
-export default function useMeta({ title, description, image, url }) {
+export default function useMeta({ title, description, image, url, robots }) {
   useEffect(() => {
     if (title) document.title = title;
     upsert('meta[name="description"]', "name", "name", "description", description);
@@ -34,6 +34,7 @@ export default function useMeta({ title, description, image, url }) {
     upsert('meta[name="twitter:title"]', "name", "name", "twitter:title", title);
     upsert('meta[name="twitter:description"]', "name", "name", "twitter:description", description);
     upsert('meta[name="twitter:image"]', "name", "name", "twitter:image", image);
+    upsert('meta[name="robots"]', "name", "name", "robots", robots);
     setLink("canonical", url);
-  }, [title, description, image, url]);
+  }, [title, description, image, url, robots]);
 }

@@ -3,7 +3,8 @@ import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import Marquee from "react-fast-marquee";
 import Logo from "@/components/Logo";
-import api from "@/lib/api";
+import api, { mediaUrl } from "@/lib/api";
+import useMeta from "@/hooks/useMeta";
 import { Button } from "@/components/ui/button";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import {
@@ -11,20 +12,42 @@ import {
   ShieldCheck, Sparkles, ArrowRight, Play, Check, Menu, X,
 } from "lucide-react";
 
-const AVATARS = [
-  "https://images.unsplash.com/photo-1680444602159-cd8b9abe4698?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTV8MHwxfHNlYXJjaHwxfHxzbWlsaW5nJTIwZmFjZSUyMHBvcnRyYWl0fGVufDB8fHx8MTc4Njc4NTY5Mnww&ixlib=rb-4.1.0&q=85",
-  "https://images.unsplash.com/photo-1567516364473-233c4b6fcfbe?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTV8MHwxfHNlYXJjaHw0fHxzbWlsaW5nJTIwZmFjZSUyMHBvcnRyYWl0fGVufDB8fHx8MTc4Njc4NTY5Mnww&ixlib=rb-4.1.0&q=85",
-  "https://images.unsplash.com/photo-1623717217554-72ca676de535?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTV8MHwxfHNlYXJjaHwzfHxzbWlsaW5nJTIwZmFjZSUyMHBvcnRyYWl0fGVufDB8fHx8MTc4Njc4NTY5Mnww&ixlib=rb-4.1.0&q=85",
-];
+// The homepage wall shows real, approved testimonials from a workspace wall
+// (set in Admin → Platform integrations, or REACT_APP_HOMEPAGE_WALL at build time).
+// We never render invented quotes: if no wall is configured/approved, we show a
+// product preview instead.
+const HOMEPAGE_WALL_SLUG = process.env.REACT_APP_HOMEPAGE_WALL || "";
 
-const WALL = [
-  { n: "Sarah Johnson", r: "VP Marketing, Acme", a: AVATARS[0], t: "Our conversion rate jumped 34% after adding the wall of love to our pricing page." },
-  { n: "Marcus Lee", r: "Founder, Bright Labs", a: AVATARS[1], t: "Customers record a video in one click. No apps, no friction. This is how modern SaaS should feel." },
-  { n: "Elena Rodriguez", r: "Creative Director", a: AVATARS[2], t: "I've tried three other tools. None came close. The embed widgets look absolutely stunning." },
-  { n: "David Chen", r: "Head of Product", a: AVATARS[0], t: "Setup took two minutes. The approval workflow keeps everything perfectly organized." },
-  { n: "Priya Nair", r: "Business Coach", a: AVATARS[1], t: "Every happy client leaves a testimonial in under a minute. Total game changer for my funnel." },
-  { n: "Tom Wallace", r: "COO, Ship&Co", a: AVATARS[2], t: "The masonry wall on our homepage is the first thing every visitor mentions." },
-];
+function wallInitials(t) {
+  return `${(t.first_name || "")[0] || ""}${(t.last_name || "")[0] || ""}`.toUpperCase() || "?";
+}
+
+function WallCard({ t, accent = "#ff5722" }) {
+  const avatar = mediaUrl(t.avatar_url);
+  return (
+    <div className="p-4 rounded-2xl bg-[#111] border border-white/10 mb-3 last:mb-0" data-testid="homepage-wall-card">
+      {t.rating ? (
+        <div className="flex gap-0.5 mb-2" style={{ color: accent }}>
+          {[1, 2, 3, 4, 5].map((s) => <Star key={s} size={13} fill={s <= t.rating ? "currentColor" : "transparent"} />)}
+        </div>
+      ) : null}
+      <p className="text-sm text-white/80 mb-3 leading-relaxed line-clamp-4">“{t.text || "Video testimonial"}”</p>
+      <div className="flex items-center gap-2.5">
+        {avatar ? (
+          <img src={avatar} className="w-9 h-9 rounded-full object-cover" alt="" />
+        ) : (
+          <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold text-white" style={{ background: accent }}>{wallInitials(t)}</div>
+        )}
+        <div>
+          <div className="text-sm font-semibold flex items-center gap-1">
+            {t.first_name} {t.last_name} <CheckCircle2 size={13} className="text-primary" />
+          </div>
+          <div className="text-xs text-white/50">{[t.role, t.company].filter(Boolean).join(" · ") || "Verified customer"}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const STEPS = [
   { icon: Share2, title: "Ask", d: "Share your personal testimonial collection link with your customers via email, SMS, or WhatsApp." },
@@ -48,7 +71,8 @@ const FAQ = [
   { q: "Where can I embed the widgets?", a: "Anywhere — Webflow, WordPress, Shopify, Wix, Squarespace, Framer, Carrd, or any custom HTML site. Just paste one line of code." },
   { q: "Can I collect video testimonials?", a: "Yes. Customers can record directly in their browser on desktop or mobile, or upload an existing video." },
   { q: "Will widgets update automatically?", a: "Yes. When you approve, edit, or feature a testimonial, your embedded widgets update instantly everywhere." },
-  { q: "Is there a free plan?", a: "Yes, our Free plan is free forever with no credit card required." },
+  { q: "Is there a free plan?", a: "Yes. The Free plan is free forever and never asks for a card — unlimited collection pages and widgets, up to 10 testimonials." },
+  { q: "Do I need a credit card to start?", a: "Not for the Free plan. If you start a paid plan you get a 7-day free trial, and that trial does require a card so it can continue automatically — cancel any time before day 8 and you're not charged." },
 ];
 
 function Nav() {
@@ -86,6 +110,7 @@ export default function Landing() {
   const [pricing, setPricing] = useState([]);
   const [promo, setPromo] = useState("");
   const [trial, setTrial] = useState({ days: 0, requires_card: true });
+  const [wall, setWall] = useState(null);
   useEffect(() => {
     (async () => {
       try {
@@ -99,11 +124,27 @@ export default function Landing() {
           days: Number(cfgRes.data?.trial_period_days || 0),
           requires_card: cfgRes.data?.trial_requires_card !== false,
         });
+        const wallSlug = cfgRes.data?.homepage_wall_slug || HOMEPAGE_WALL_SLUG;
+        if (wallSlug) {
+          const wallRes = await api.get(`/public/wall/${wallSlug}`).catch(() => null);
+          if (wallRes?.data?.testimonials?.length) setWall(wallRes.data);
+        }
       } catch (e) {
         setPricing([]);
       }
     })();
   }, []);
+
+  useMeta({
+    title: "Testify — Customer Testimonials Made Simple",
+    description:
+      "Collect video and written customer testimonials in the browser, approve them, and embed them anywhere with one line of code. Free plan, no card required.",
+    url: typeof window !== "undefined" ? `${window.location.origin}/` : null,
+  });
+
+  const wallItems = wall?.testimonials || [];
+  const rated = wallItems.filter((t) => typeof t.rating === "number" && t.rating > 0);
+  const avgRating = rated.length ? (rated.reduce((sum, t) => sum + t.rating, 0) / rated.length).toFixed(1) : null;
 
   return (
     <div className="dark bg-background text-foreground min-h-screen">
@@ -118,7 +159,7 @@ export default function Landing() {
         <div className="max-w-7xl mx-auto px-6 pt-20 pb-16 grid lg:grid-cols-12 gap-12 items-center relative z-10">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }} className="lg:col-span-7">
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-white/10 bg-white/5 text-xs text-white/70 mb-6">
-              <Sparkles size={14} className="text-primary" /> Trusted by 2,000+ modern brands
+              <Sparkles size={14} className="text-primary" /> {wallItems.length ? `${wall.count} real ${wall.count === 1 ? "testimonial" : "testimonials"} on our own wall` : "Video + written testimonials, one link"}
             </div>
             <h1 className="font-heading text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tighter leading-[1.05] mb-6">
               Turn happy customers into your <span className="text-primary">best marketing</span>.
@@ -130,39 +171,67 @@ export default function Landing() {
               <Link to="/register"><Button size="lg" className="h-12 px-7 gap-2 text-base" data-testid="hero-cta">Start collecting testimonials <ArrowRight size={18} /></Button></Link>
               <a href="#how"><Button size="lg" variant="outline" className="h-12 px-7 gap-2 text-base border-white/15" data-testid="hero-secondary"><Play size={16} /> See how it works</Button></a>
             </div>
-            <div className="flex items-center gap-4 mt-8 text-sm text-white/50">
-              <div className="flex -space-x-2">{AVATARS.map((a, i) => <img key={i} src={a} className="w-8 h-8 rounded-full border-2 border-black object-cover" alt="" />)}</div>
-              <div className="flex items-center gap-1 text-primary">{[1,2,3,4,5].map(i => <Star key={i} size={14} fill="currentColor" />)}<span className="text-white/60 ml-1">4.9/5 average rating</span></div>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-8 text-sm text-white/50">
+              <span className="inline-flex items-center gap-1.5"><Check size={15} className="text-primary" /> Free plan, no card</span>
+              <span className="inline-flex items-center gap-1.5"><Video size={15} className="text-primary" /> Recorded in the browser</span>
+              {wall && (
+                <Link to={`/wall/${wall.slug}`} className="inline-flex items-center gap-1 text-white/70 hover:text-white" data-testid="hero-wall-link">
+                  See a live wall <ArrowRight size={14} />
+                </Link>
+              )}
             </div>
           </motion.div>
           <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.7, delay: 0.15 }} className="lg:col-span-5">
             <div className="relative rounded-3xl border border-white/10 bg-white/[0.03] backdrop-blur-xl p-5 shadow-2xl">
-              <div className="absolute -top-3 -right-3 px-3 py-1.5 rounded-full bg-primary text-white text-xs font-semibold animate-float">Live widget</div>
-              {WALL.slice(0, 3).map((w, i) => (
-                <div key={i} className="p-4 rounded-2xl bg-[#111] border border-white/10 mb-3 last:mb-0">
-                  <div className="flex gap-0.5 mb-2 text-primary">{[1,2,3,4,5].map(s => <Star key={s} size={13} fill="currentColor" />)}</div>
-                  <p className="text-sm text-white/80 mb-3 leading-relaxed">"{w.t}"</p>
+              <div className="absolute -top-3 -right-3 px-3 py-1.5 rounded-full bg-primary text-white text-xs font-semibold animate-float">{wallItems.length ? "Live widget" : "How it works"}</div>
+              {wallItems.length ? (
+                <>
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-white/40 mb-3 px-1">Approved customers of {wall.business_name}</p>
+                  {wallItems.slice(0, 3).map((t) => <WallCard key={t.id} t={t} />)}
+                  <Link to={`/wall/${wall.slug}`} className="block mt-3 text-xs text-white/60 hover:text-white" data-testid="hero-wall-card-link">
+                    See all {wall.count} on the wall →
+                  </Link>
+                </>
+              ) : (
+                <div className="p-4 rounded-2xl bg-[#111] border border-white/10">
+                  <div className="flex items-center gap-2 text-xs text-white/40 mb-3"><MessageSquareQuote size={14} className="text-primary" /> A testimonial, start to finish</div>
+                  <p className="text-sm text-white/75 leading-relaxed mb-3">“We ask every customer for a testimonial with one link. They record a 60-second video on their phone — no app, no login — and we approve it from the dashboard.”</p>
                   <div className="flex items-center gap-2.5">
-                    <img src={w.a} className="w-9 h-9 rounded-full object-cover" alt="" />
-                    <div><div className="text-sm font-semibold flex items-center gap-1">{w.n} <CheckCircle2 size={13} className="text-primary" /></div><div className="text-xs text-white/50">{w.r}</div></div>
+                    <div className="w-9 h-9 rounded-full bg-primary flex items-center justify-center text-white text-xs font-bold">YT</div>
+                    <div><div className="text-sm font-semibold">Your customer</div><div className="text-xs text-white/50">Where this card will sit</div></div>
                   </div>
+                  <Link to="/register" className="mt-4 inline-flex items-center gap-1 text-xs text-primary hover:underline">Collect your first one <ArrowRight size={13} /></Link>
                 </div>
-              ))}
+              )}
             </div>
           </motion.div>
         </div>
 
-        {/* Marquee wall */}
-        <div className="py-6 border-y border-white/10 bg-white/[0.02]">
-          <Marquee gradient gradientColor="#0a0a0a" gradientWidth={80} speed={40} pauseOnHover>
-            {WALL.map((w, i) => (
-              <div key={i} className="mx-3 w-80 p-4 rounded-2xl bg-[#111] border border-white/10">
-                <p className="text-sm text-white/75 mb-3 leading-relaxed line-clamp-3">"{w.t}"</p>
-                <div className="flex items-center gap-2.5"><img src={w.a} className="w-8 h-8 rounded-full object-cover" alt="" /><div><div className="text-xs font-semibold">{w.n}</div><div className="text-xs text-white/50">{w.r}</div></div></div>
-              </div>
-            ))}
-          </Marquee>
-        </div>
+        {/* Real customer wall — rendered only when a wall is configured and approved */}
+        {wallItems.length > 0 && (
+          <div id="wall" className="py-6 border-y border-white/10 bg-white/[0.02]">
+            <div className="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
+              <p className="text-sm text-white/50">
+                Real, approved testimonials from <span className="text-white/80">{wall.business_name}</span>
+                {avgRating && <span className="ml-2 text-primary">{avgRating}/5</span>}
+              </p>
+              <Link to={`/wall/${wall.slug}`} className="text-sm text-white/70 hover:text-white inline-flex items-center gap-1" data-testid="homepage-wall-link">
+                See the full wall <ArrowRight size={14} />
+              </Link>
+            </div>
+            <Marquee gradient gradientColor="#0a0a0a" gradientWidth={80} speed={40} pauseOnHover>
+              {wallItems.map((t) => (
+                <div key={t.id} className="mx-3 w-80 p-4 rounded-2xl bg-[#111] border border-white/10">
+                  <p className="text-sm text-white/75 mb-3 leading-relaxed line-clamp-3">“{t.text || "Video testimonial"}”</p>
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-[11px] font-bold text-white">{wallInitials(t)}</div>
+                    <div><div className="text-xs font-semibold">{t.first_name} {t.last_name}</div><div className="text-xs text-white/50">{[t.role, t.company].filter(Boolean).join(" · ")}</div></div>
+                  </div>
+                </div>
+              ))}
+            </Marquee>
+          </div>
+        )}
       </section>
 
       {/* How it works */}
@@ -224,17 +293,21 @@ export default function Landing() {
             const cta = showTrial
               ? `Start ${trial.days}-day free trial`
               : (p.cta || (isFree ? "Start free" : "Start free trial"));
+            // Spell out the card requirement exactly, so the pricing card and the
+            // FAQ can never disagree about what checkout will ask for.
+            const trialNote = isFree
+              ? "Free forever · no credit card required"
+              : showTrial
+                ? `${trial.days}-day free trial · ${trial.requires_card ? "card required at checkout" : "no card required"} · cancel anytime`
+                : "Cancel anytime · no setup fee";
             return (
               <div key={p.id} className={`p-8 rounded-3xl border ${p.featured ? "border-primary bg-primary/[0.06] relative" : "border-white/10 bg-white/[0.02]"}`}>
                 {p.featured && <div className="absolute -top-3 left-8 px-3 py-1 rounded-full bg-primary text-white text-xs font-semibold">Most popular</div>}
                 <h3 className="font-heading text-lg font-semibold mb-1">{p.name}</h3>
                 <div className="flex items-end gap-1 mb-2"><span className="font-heading text-4xl font-bold">{priceLabel}</span><span className="text-white/50 text-sm mb-1">{period}</span></div>
-                {showTrial && (
-                  <p className="text-xs text-primary mb-5" data-testid={`pricing-trial-${p.id}`}>
-                    {trial.days}-day free trial · cancel anytime{trial.requires_card ? "" : " · no card required"}
-                  </p>
-                )}
-                {!showTrial && <div className="mb-4" />}
+                <p className={`text-xs mb-5 ${isFree ? "text-white/45" : "text-primary"}`} data-testid={`pricing-trial-${p.id}`}>
+                  {trialNote}
+                </p>
                 <Link to="/register"><Button className="w-full mb-6" variant={p.featured ? "default" : "outline"} data-testid={`pricing-${p.id}`}>{cta}</Button></Link>
                 <ul className="space-y-3">{(p.features || []).map((f) => <li key={f} className="flex items-start gap-2 text-sm text-white/70"><Check size={16} className="text-primary mt-0.5 flex-shrink-0" /> {f}</li>)}</ul>
               </div>
@@ -250,7 +323,9 @@ export default function Landing() {
           {FAQ.map((f, i) => (
             <AccordionItem key={i} value={`item-${i}`} className="border-white/10">
               <AccordionTrigger className="text-left font-heading font-medium hover:no-underline">{f.q}</AccordionTrigger>
-              <AccordionContent className="text-white/55">{f.a}</AccordionContent>
+              {/* forceMount keeps every answer in the served HTML so crawlers and
+                  no-JS readers can see it, even while the panel is collapsed. */}
+              <AccordionContent forceMount className="text-white/55">{f.a}</AccordionContent>
             </AccordionItem>
           ))}
         </Accordion>
@@ -262,7 +337,7 @@ export default function Landing() {
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[500px] h-[300px] bg-primary/25 blur-[120px]" />
           <div className="relative z-10">
             <h2 className="font-heading text-3xl sm:text-4xl font-bold tracking-tight mb-4">Start collecting testimonials today</h2>
-            <p className="text-white/60 mb-8 max-w-lg mx-auto">Free forever plan. No credit card required. Your first testimonial is one link away.</p>
+            <p className="text-white/60 mb-8 max-w-lg mx-auto">Start on the Free plan — no credit card, no trial clock, unlimited widgets. Upgrade to Pro when you need video testimonials.</p>
             <Link to="/register"><Button size="lg" className="h-12 px-8 gap-2" data-testid="footer-cta">Get started free <ArrowRight size={18} /></Button></Link>
           </div>
         </div>

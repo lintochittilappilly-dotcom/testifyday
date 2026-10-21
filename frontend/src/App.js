@@ -20,6 +20,8 @@ import CollectionEditor from "@/pages/dashboard/CollectionEditor";
 import Widgets from "@/pages/dashboard/Widgets";
 import WidgetBuilder from "@/pages/dashboard/WidgetBuilder";
 import Analytics from "@/pages/dashboard/Analytics";
+import Requests from "@/pages/dashboard/Requests";
+import Webhooks from "@/pages/dashboard/Webhooks";
 import Settings from "@/pages/dashboard/Settings";
 import PublicCollection from "@/pages/PublicCollection";
 import WidgetEmbed from "@/pages/WidgetEmbed";
@@ -28,6 +30,7 @@ import PaymentSuccess from "@/pages/PaymentSuccess";
 import PaymentCancel from "@/pages/PaymentCancel";
 import Terms from "@/pages/Terms";
 import Privacy from "@/pages/Privacy";
+import NotFound from "@/pages/NotFound";
 
 function LoadingScreen() {
   return (
@@ -69,6 +72,8 @@ function AppRouter() {
         <Route path="widgets" element={<Widgets />} />
         <Route path="widgets/:id" element={<WidgetBuilder />} />
         <Route path="analytics" element={<Analytics />} />
+        <Route path="requests" element={<Requests />} />
+        <Route path="webhooks" element={<Webhooks />} />
         <Route path="settings" element={<Settings />} />
       </Route>
       <Route path="/t/:slug" element={<PublicCollection />} />
@@ -78,7 +83,7 @@ function AppRouter() {
       <Route path="/payment/cancel" element={<PaymentCancel />} />
       <Route path="/terms" element={<Terms />} />
       <Route path="/privacy" element={<Privacy />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<NotFound />} />
     </Routes>
   );
 }

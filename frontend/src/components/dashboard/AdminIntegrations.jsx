@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Save, ShieldCheck, Mail, MapPin, KeyRound, Ticket, DollarSign, CreditCard, CheckCircle2, XCircle, AlertCircle, RefreshCw, Video, Timer } from "lucide-react";
+import { Save, ShieldCheck, Mail, MapPin, KeyRound, Ticket, DollarSign, CreditCard, CheckCircle2, XCircle, AlertCircle, RefreshCw, Video, Timer, Quote, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 function Group({ icon: Icon, title, desc, children }) {
@@ -178,6 +178,8 @@ export default function AdminIntegrations() {
       resend_api_key: s.resend_api_key, sender_email: s.sender_email, google_places_api_key: s.google_places_api_key,
       checkout_coupon_id: s.checkout_coupon_id, promo_banner: s.promo_banner, plans_override: s.plans_override,
       video_limits: s.video_limits,
+      homepage_wall_slug: (s.homepage_wall_slug || "").trim(),
+      ai_captions_enabled: s.ai_captions_enabled !== false,
       trial_period_days: Number(s.trial_period_days ?? 0),
       trial_require_card: s.trial_require_card !== false,
     }),
@@ -285,6 +287,30 @@ export default function AdminIntegrations() {
       <Group icon={ShieldCheck} title="Google reCAPTCHA v2" desc="Protect public testimonial forms from spam. Register a v2 Checkbox site at google.com/recaptcha/admin.">
         <div><Label className="mb-1.5 block text-xs">Site key</Label><Input value={s.recaptcha_site_key || ""} onChange={(e) => set("recaptcha_site_key", e.target.value)} placeholder="6Lc..." data-testid="set-recaptcha-site" /></div>
         <div><Label className="mb-1.5 block text-xs">Secret key</Label><Input type="password" value={s.recaptcha_secret_key || ""} onChange={(e) => set("recaptcha_secret_key", e.target.value)} placeholder="6Lc..." data-testid="set-recaptcha-secret" /></div>
+      </Group>
+
+      <Group icon={Sparkles} title="AI captions" desc="Transcribe video testimonials with OpenAI Whisper and attach a WebVTT caption track to every video widget. Requires OPENAI_API_KEY on the backend and a Pro or Business workspace.">
+        <div>
+          <Label className="mb-1.5 block text-xs">Generate captions automatically</Label>
+          <select
+            className="w-full h-10 rounded-md border border-border bg-background px-3 text-sm"
+            value={String(s.ai_captions_enabled !== false)}
+            onChange={(e) => set("ai_captions_enabled", e.target.value === "true")}
+            data-testid="set-ai-captions"
+          >
+            <option value="true">Yes — transcribe each new video testimonial</option>
+            <option value="false">No — captions off</option>
+          </select>
+          <p className="text-xs text-muted-foreground mt-1">Videos over 25 MB are skipped by the provider. You can also regenerate captions per testimonial from its detail page.</p>
+        </div>
+      </Group>
+
+      <Group icon={Quote} title="Homepage social proof" desc="Shows real, approved testimonials on the landing page, linked to that workspace's public wall. Leave blank to show the product preview instead of any quotes.">
+        <div>
+          <Label className="mb-1.5 block text-xs">Workspace slug to feature</Label>
+          <Input value={s.homepage_wall_slug || ""} onChange={(e) => set("homepage_wall_slug", e.target.value)} placeholder="e.g. testify" data-testid="set-homepage-wall" />
+          <p className="text-xs text-muted-foreground mt-1">The slug is the last part of the wall URL: testify.day/wall/<strong>your-slug</strong>. Only approved testimonials are shown.</p>
+        </div>
       </Group>
 
       <Group icon={Mail} title="Resend (Email)" desc="Send new-testimonial alerts and password reset emails. Verify a domain at resend.com/domains to email anyone.">

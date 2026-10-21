@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, Check, X, Archive, Star, Trash2, Save, Plus, ShieldCheck, Star as StarIcon } from "lucide-react";
+import { ArrowLeft, Check, X, Archive, Star, Trash2, Save, Plus, ShieldCheck, Star as StarIcon, Captions } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 
@@ -32,6 +32,15 @@ export default function TestimonialDetail() {
   const addTag = useMutation({ mutationFn: (tag) => api.post(`/testimonials/${id}/tags`, { tag }), onSuccess: () => { invalidate(); setNewTag(""); qc.invalidateQueries({ queryKey: ["tags"] }); } });
   const removeTag = useMutation({ mutationFn: (tag) => api.delete(`/testimonials/${id}/tags/${encodeURIComponent(tag)}`), onSuccess: () => invalidate() });
   const del = useMutation({ mutationFn: () => api.delete(`/testimonials/${id}`), onSuccess: () => { toast.success("Deleted"); navigate("/dashboard/testimonials"); } });
+  const transcribe = useMutation({
+    mutationFn: () => api.post(`/testimonials/${id}/transcribe`),
+    onSuccess: () => {
+      toast.success("Generating captions — usually under a minute");
+      // The worker writes the transcript asynchronously; poll a few times.
+      [10000, 25000, 45000].forEach((ms) => setTimeout(invalidate, ms));
+    },
+    onError: (e) => toast.error(formatApiError(e)),
+  });
 
   if (isLoading || !form) return <div className="space-y-4"><Skeleton className="h-8 w-40" /><Skeleton className="h-96 rounded-2xl" /></div>;
 
@@ -55,6 +64,24 @@ export default function TestimonialDetail() {
           {t.video_url && (
             <div className="rounded-2xl overflow-hidden bg-black border border-border"><video src={mediaUrl(t.video_url)} controls className="w-full max-h-[480px]" /></div>
           )}
+          {t.video_url && (
+            <div className="mt-4 rounded-2xl border border-border bg-card p-5" data-testid="transcript-card">
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <h3 className="font-heading font-semibold flex items-center gap-2"><Captions size={16} className="text-primary" /> AI captions &amp; transcript</h3>
+                <Button size="sm" variant="outline" onClick={() => transcribe.mutate()} disabled={transcribe.isPending} data-testid="generate-captions">
+                  {t.transcript ? "Regenerate" : "Generate"}
+                </Button>
+              </div>
+              {t.transcript ? (
+                <p className="text-sm text-muted-foreground leading-relaxed">{t.transcript}</p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  No transcript yet. Captions are burned into the video widget (a WebVTT track) so on-mute viewers and screen readers get the words too.
+                </p>
+              )}
+            </div>
+          )}
+
           {!t.video_url && t.image_url && (
             <div className="rounded-2xl overflow-hidden bg-black border border-border"><img src={mediaUrl(t.image_url)} alt="" className="w-full max-h-[480px] object-contain" /></div>
           )}

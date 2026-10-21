@@ -23,9 +23,13 @@ export default function WallOfLove() {
 
   useMeta({
     title: data ? `${data.business_name} — Wall of Love` : "Wall of Love",
-    description: data ? `See why ${data.count} customers love ${data.business_name}. Real testimonials and reviews.` : "Customer testimonials wall.",
-    image: data ? mediaUrl(data.logo_url) : null,
+    description: data
+      ? `See what ${data.count} ${data.count === 1 ? "customer says" : "customers say"} about ${data.business_name}. Real, approved testimonials collected with Testify.`
+      : "Customer testimonials wall.",
+    // Server-rendered card (1200x630 PNG) so links unfurl with the business name.
+    image: data?.og_image ? mediaUrl(data.og_image) : mediaUrl(data?.logo_url),
     url: typeof window !== "undefined" ? window.location.href : null,
+    robots: status === "error" ? "noindex" : undefined,
   });
 
   const accent = data?.primary_color || "#ff5722";

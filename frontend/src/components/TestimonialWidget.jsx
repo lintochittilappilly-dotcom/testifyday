@@ -53,7 +53,10 @@ function Card({ t, cfg, isDark }) {
       {hasVideo ? (
         <div className="relative w-full rounded-lg overflow-hidden mb-3" style={{ aspectRatio: "9/16", maxHeight: 320, background: "#000" }}>
           <video src={mediaUrl(t.video_url)} controls playsInline poster={mediaUrl(t.video_thumbnail_url)}
-            className="w-full h-full object-cover" preload="metadata" />
+            className="w-full h-full object-cover" preload="metadata">
+            {/* AI-generated captions: watched on mute by most viewers, and required for a11y. */}
+            {t.captions_url && <track kind="captions" src={mediaUrl(t.captions_url)} srcLang="en" label="English" default />}
+          </video>
         </div>
       ) : t.image_url ? (
         <>

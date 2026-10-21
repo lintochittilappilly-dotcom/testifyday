@@ -8,7 +8,7 @@ import Logo from "@/components/Logo";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
-import { LayoutDashboard, MessageSquareQuote, FolderOpen, LayoutGrid, BarChart3, Settings as SettingsIcon, Menu, X, LogOut, Sun, Moon, Plus, ChevronsUpDown, Check, Building2 } from "lucide-react";
+import { LayoutDashboard, MessageSquareQuote, FolderOpen, LayoutGrid, BarChart3, Send, Webhook, Settings as SettingsIcon, Menu, X, LogOut, Sun, Moon, Plus, ChevronsUpDown, Check, Building2 } from "lucide-react";
 import { mediaUrl } from "@/lib/api";
 
 const NAV = [
@@ -16,6 +16,8 @@ const NAV = [
   { to: "/dashboard/testimonials", label: "Testimonials", icon: MessageSquareQuote },
   { to: "/dashboard/collections", label: "Collection Pages", icon: FolderOpen },
   { to: "/dashboard/widgets", label: "Widgets", icon: LayoutGrid },
+  { to: "/dashboard/requests", label: "Review Requests", icon: Send },
+  { to: "/dashboard/webhooks", label: "Webhooks", icon: Webhook },
   { to: "/dashboard/analytics", label: "Analytics", icon: BarChart3 },
   { to: "/dashboard/settings", label: "Settings", icon: SettingsIcon },
 ];
